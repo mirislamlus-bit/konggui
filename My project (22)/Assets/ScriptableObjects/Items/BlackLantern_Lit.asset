@@ -1,0 +1,19 @@
+%YAML 1.1
+%TAG !u! tag:unity3d.com,2011:
+--- !u!114 &11400000
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 0}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 8140a54e370d420e89c45b27d41543af, type: 3}
+  m_Name: BlackLantern_Lit
+  m_EditorClassIdentifier: 
+  itemId: BlackLantern_Lit
+  itemName: "\u9ED1\u706F\uFF08\u5DF2\u70B9\u71C3\uFF09"
+  description: "\u706F\u706B\u5F88\u4F4E\uFF0C\u5374\u80FD\u7167\u51FA\u4E0D\u8BE5\u88AB\u770B\u89C1\u7684\u4E1C\u897F\u3002"
+  icon: {fileID: 21300000, guid: 0211baec9bdce2d47befc4474b3e24a1, type: 3}
+  itemType: 0

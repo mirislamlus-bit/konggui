@@ -1,0 +1,23 @@
+# Unity缓存文件
+Library/
+Temp/
+obj/
+Build/
+Builds/
+Logs/
+UserSettings/
+
+# 包管理缓存
+Packages/*/
+!Packages/manifest.json
+!Packages/packages-lock.json
+
+# 其他缓存
+.vs/
+*.csproj
+*.sln
+*.userprefs
+*.pidb
+*.suo
+*.unityproj
+*.booproj
