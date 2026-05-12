@@ -1,5 +1,6 @@
 using JianDeng;
 using UnityEngine;
+using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public static class ChapterOneRuntimeBootstrap
@@ -12,6 +13,11 @@ public static class ChapterOneRuntimeBootstrap
     [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
     private static void BuildIfNeeded()
     {
+        if (SceneManager.GetActiveScene().name != "Chapter1_GuiZhen_MVP")
+        {
+            return;
+        }
+
         if (Object.FindObjectOfType<ChapterOneGame>() != null)
         {
             return;

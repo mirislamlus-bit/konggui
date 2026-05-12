@@ -10,7 +10,6 @@ public sealed class PlayerController : MonoBehaviour
     private SpriteRenderer spriteRenderer;
     private Animator animator;
     private Rigidbody2D body;
-    private LanternVisionController lanternVision;
     private float horizontalInput;
 
     private void Awake()
@@ -19,7 +18,6 @@ public sealed class PlayerController : MonoBehaviour
         animator = GetComponent<Animator>();
         body = GetComponent<Rigidbody2D>();
         body.freezeRotation = true;
-        lanternVision = FindObjectOfType<LanternVisionController>();
     }
 
     private void Update()
@@ -34,17 +32,10 @@ public sealed class PlayerController : MonoBehaviour
             spriteRenderer.flipX = horizontalInput < 0f;
         }
 
-        if (Input.GetKeyDown(KeyCode.E))
-        {
-            animator.SetTrigger("Interact");
-        }
-
         if (Input.GetKeyDown(KeyCode.Q))
         {
             animator.SetTrigger("RaiseLantern");
         }
-
-        SyncLanternVisionAnimator();
     }
 
     private void FixedUpdate()
@@ -52,13 +43,4 @@ public sealed class PlayerController : MonoBehaviour
         body.velocity = new Vector2(horizontalInput * moveSpeed, body.velocity.y);
     }
 
-    private void SyncLanternVisionAnimator()
-    {
-        if (lanternVision == null)
-        {
-            lanternVision = FindObjectOfType<LanternVisionController>();
-        }
-
-        animator.SetBool("IsLanternVision", lanternVision != null && lanternVision.IsLanternVisionEnabled);
-    }
 }

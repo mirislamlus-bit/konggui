@@ -584,6 +584,7 @@ GameObject:
   m_Component:
   - component: {fileID: 847368678}
   - component: {fileID: 847368677}
+  - component: {fileID: 847368679}
   m_Layer: 0
   m_Name: LanternVision_BG
   m_TagString: Untagged
@@ -658,6 +659,19 @@ Transform:
   m_Father: {fileID: 288934510}
   m_RootOrder: 1
   m_LocalEulerAnglesHint: {x: 0, y: 0, z: 0}
+--- !u!114 &847368679
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 847368676}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f498f9f1d5d47d293f71f738a9d5a4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  coverOverscan: 1.12
 --- !u!1 &907583169
 GameObject:
   m_ObjectHideFlags: 0
@@ -1490,6 +1504,7 @@ GameObject:
   m_Component:
   - component: {fileID: 1688219058}
   - component: {fileID: 1688219059}
+  - component: {fileID: 1688219060}
   m_Layer: 0
   m_Name: Reality_BG
   m_TagString: Untagged
@@ -1564,6 +1579,19 @@ SpriteRenderer:
   m_WasSpriteAssigned: 1
   m_MaskInteraction: 0
   m_SpriteSortPoint: 0
+--- !u!114 &1688219060
+MonoBehaviour:
+  m_ObjectHideFlags: 0
+  m_CorrespondingSourceObject: {fileID: 0}
+  m_PrefabInstance: {fileID: 0}
+  m_PrefabAsset: {fileID: 0}
+  m_GameObject: {fileID: 1688219057}
+  m_Enabled: 1
+  m_EditorHideFlags: 0
+  m_Script: {fileID: 11500000, guid: 6f498f9f1d5d47d293f71f738a9d5a4a, type: 3}
+  m_Name: 
+  m_EditorClassIdentifier: 
+  coverOverscan: 1.12
 --- !u!1 &1769951850
 GameObject:
   m_ObjectHideFlags: 0

@@ -6,7 +6,7 @@ AnimationClip:
   m_CorrespondingSourceObject: {fileID: 0}
   m_PrefabInstance: {fileID: 0}
   m_PrefabAsset: {fileID: 0}
-  m_Name: 
+  m_Name: LinZhaoying_Idle
   serializedVersion: 7
   m_Legacy: 0
   m_Compressed: 0
@@ -20,11 +20,11 @@ AnimationClip:
   m_PPtrCurves:
   - curve:
     - time: 0
-      value: {fileID: 1109155186, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
+      value: {fileID: 978971661, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
     - time: 0.16666667
-      value: {fileID: 1202708854, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
+      value: {fileID: -1115100977, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
     - time: 0.33333334
-      value: {fileID: -383833270, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
+      value: {fileID: 1113682733, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
     attribute: m_Sprite
     path: 
     classID: 212
@@ -44,9 +44,9 @@ AnimationClip:
       customType: 23
       isPPtrCurve: 1
     pptrCurveMapping:
-    - {fileID: 1109155186, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
-    - {fileID: 1202708854, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
-    - {fileID: -383833270, guid: aa3fba79522cf274eb25fa6e9b73f595, type: 3}
+    - {fileID: 978971661, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
+    - {fileID: -1115100977, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
+    - {fileID: 1113682733, guid: 0b59c5df579e383439445c98e9ea570b, type: 3}
   m_AnimationClipSettings:
     serializedVersion: 2
     m_AdditiveReferencePoseClip: {fileID: 0}

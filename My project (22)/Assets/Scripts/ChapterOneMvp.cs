@@ -147,15 +147,12 @@ namespace JianDeng
 
         private void FollowCamera()
         {
-            if (mainCamera == null || player == null)
+            if (mainCamera == null)
             {
                 return;
             }
 
-            Vector3 cameraPosition = mainCamera.transform.position;
-            cameraPosition.x = Mathf.Lerp(cameraPosition.x, player.position.x, Time.deltaTime * 3f);
-            cameraPosition.x = Mathf.Clamp(cameraPosition.x, -2.4f, 2.4f);
-            mainCamera.transform.position = cameraPosition;
+            mainCamera.transform.position = new Vector3(0f, 0f, -10f);
         }
 
         private void TryInteract()
