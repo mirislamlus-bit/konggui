@@ -22,6 +22,8 @@ public sealed class BlackLanternPickupInteractable : MonoBehaviour, IInteractabl
         GameStateManager state = GameStateManager.EnsureInstance();
         state.hasBlackLantern = true;
         state.isBlackLanternLit = false;
+        Debug.Log("[Chapter1State] hasBlackLantern = true");
+        Debug.Log("[Chapter1State] isBlackLanternLit = false");
         AddInventoryItem();
 
         if (DialogueManager.Instance != null)

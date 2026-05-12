@@ -6,7 +6,7 @@ public sealed class InteractionDetector : MonoBehaviour
 {
     [SerializeField] private GameObject promptRoot;
     [SerializeField] private Text promptText;
-    [SerializeField] private string promptMessage = "[E] 互动";
+    [SerializeField] private string promptMessage = "[E] \u4e92\u52a8";
     [SerializeField] private Vector3 worldPromptOffset = new Vector3(0f, 1.15f, 0f);
 
     private readonly List<Collider2D> nearbyColliders = new List<Collider2D>();
@@ -46,6 +46,12 @@ public sealed class InteractionDetector : MonoBehaviour
         }
 
         if (currentInteractable == null)
+        {
+            return;
+        }
+
+        IInteractionPrompt prompt = currentInteractable as IInteractionPrompt;
+        if (prompt != null && !prompt.CanShowPrompt)
         {
             return;
         }
@@ -113,6 +119,13 @@ public sealed class InteractionDetector : MonoBehaviour
         currentInteractable = bestInteractable;
 
         if (currentInteractable == null)
+        {
+            HidePrompt();
+            return;
+        }
+
+        IInteractionPrompt prompt = currentInteractable as IInteractionPrompt;
+        if (prompt != null && !prompt.CanShowPrompt)
         {
             HidePrompt();
             return;

@@ -16,30 +16,32 @@ public sealed class RiverLanternInteractable : MonoBehaviour, IInteractable
         bool fullLampView = lampView != null &&
             lampView.IsLampViewEnabled &&
             lampView.CurrentState == LampViewController.LampViewState.Full;
+        bool lanternVision = fullLampView || state.isLanternVision;
 
         if (!namedLantern)
         {
             state.hasCheckedNormalRiverLantern = true;
-            DialogueManager.Show("林照萤：河灯还亮着，像是刚被人放下。");
+            Debug.Log("[Chapter1State] hasCheckedNormalRiverLantern = true");
+            DialogueManager.Show("\u6797\u7167\u8424\uff1a\u6cb3\u706f\u8fd8\u4eae\u7740\uff0c\u50cf\u662f\u521a\u88ab\u4eba\u653e\u4e0b\u3002");
             return;
         }
 
-        if (!state.isBlackLanternLit || !fullLampView)
+        if (!state.isBlackLanternLit || !lanternVision)
         {
-            DialogueManager.Show("林照萤：水面太暗，看不清河灯上的字。");
+            DialogueManager.Show("\u6797\u7167\u8424\uff1a\u6c34\u9762\u592a\u6697\uff0c\u770b\u4e0d\u6e05\u6cb3\u706f\u4e0a\u7684\u5b57\u3002");
             return;
         }
 
         state.hasSeenNamedRiverLantern = true;
+        Debug.Log("[Chapter1State] hasSeenNamedRiverLantern = true");
         RevealNamedLanternEffects();
 
         if (DialogueManager.Instance != null)
         {
             DialogueManager.Instance.ShowDialogue(new[]
             {
-                "林照萤：这上面……写的是我的名字。",
-                "林照萤：为什么我的名字会在河灯上？",
-                "去井边。"
+                "\u6797\u7167\u8424\uff1a\u8fd9\u4e0a\u9762\u2026\u2026\u5199\u7684\u662f\u6211\u7684\u540d\u5b57\u3002",
+                "\u6797\u7167\u8424\uff1a\u4e3a\u4ec0\u4e48\u6211\u7684\u540d\u5b57\u4f1a\u5728\u6cb3\u706f\u4e0a\uff1f"
             });
         }
     }

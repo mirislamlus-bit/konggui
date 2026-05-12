@@ -1,13 +1,9 @@
 using UnityEngine;
 using UnityEngine.SceneManagement;
-using UnityEngine.UI;
 
 public sealed class LanternVisionController : MonoBehaviour
 {
     [SerializeField] private SceneBackgroundSet backgroundSet;
-    [SerializeField] private GameObject lanternVisionOverlay;
-    [SerializeField, Range(0f, 1f)] private float weakLanternOverlayAlpha = 0.25f;
-    [SerializeField, Range(0f, 1f)] private float fullLanternOverlayAlpha = 0.38f;
     [SerializeField] private bool lanternVisionEnabled;
 
     public bool IsLanternVisionEnabled => lanternVisionEnabled;
@@ -67,26 +63,18 @@ public sealed class LanternVisionController : MonoBehaviour
     private void ApplyState()
     {
         ResolveSceneReferences();
-        ResolveCanvasOverlay();
+        DisableLanternVisionOverlayUi();
 
         if (backgroundSet != null)
         {
             backgroundSet.SetLanternVision(lanternVisionEnabled);
         }
 
-        if (lanternVisionOverlay != null)
+        GameStateManager state = GameStateManager.Instance;
+        if (state != null)
         {
-            lanternVisionOverlay.SetActive(lanternVisionEnabled);
-            Image overlayImage = lanternVisionOverlay.GetComponent<Image>();
-            if (overlayImage != null)
-            {
-                Color color = overlayImage.color;
-                color.a = GameStateManager.Instance != null && GameStateManager.Instance.isBlackLanternLit
-                    ? fullLanternOverlayAlpha
-                    : weakLanternOverlayAlpha;
-                overlayImage.color = color;
-                overlayImage.raycastTarget = false;
-            }
+            state.isLanternVision = lanternVisionEnabled;
+            Debug.Log("[Chapter1State] isLanternVision = " + state.isLanternVision);
         }
 
         UpdateQHint();
@@ -118,26 +106,12 @@ public sealed class LanternVisionController : MonoBehaviour
         UIManager.Instance.ShowQHint(lanternVisionEnabled ? "Q 返回现实视角" : "Q 切换灯影视角");
     }
 
-    private void ResolveCanvasOverlay()
+    private static void DisableLanternVisionOverlayUi()
     {
-        if (lanternVisionOverlay != null && lanternVisionOverlay.GetComponent<Image>() != null)
-        {
-            return;
-        }
-
         GameObject canvasOverlay = FindObjectIncludingInactive("LanternVisionOverlay_UI");
-        if (canvasOverlay == null)
-        {
-            canvasOverlay = FindObjectIncludingInactive("LanternVisionOverlay");
-            if (canvasOverlay != null && canvasOverlay.GetComponent<Image>() == null)
-            {
-                canvasOverlay = null;
-            }
-        }
-
         if (canvasOverlay != null)
         {
-            lanternVisionOverlay = canvasOverlay;
+            canvasOverlay.SetActive(false);
         }
     }
 

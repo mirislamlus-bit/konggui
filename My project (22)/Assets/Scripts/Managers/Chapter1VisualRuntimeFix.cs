@@ -58,6 +58,7 @@ public static class Chapter1VisualRuntimeFix
         Transform interactables = sceneRoot.transform.Find("Interactables");
         Transform vfx = sceneRoot.transform.Find("VFX");
         LogCriticalSceneObjects(SceneManager.GetActiveScene().name, sceneRoot.transform, background, hidden, interactables);
+        CleanupPaperEffigiesOutsideMourningHall();
 
         SetupBackground(background != null ? background.Find("Reality_BG") : null, 0, true, camera);
         SetupBackground(background != null ? background.Find("LanternVision_BG") : null, 1, false, camera);
@@ -74,6 +75,7 @@ public static class Chapter1VisualRuntimeFix
         SetupMourningHallFlow(sceneRoot.transform, interactables, hidden, player);
         SetupOldWellFlow(sceneRoot.transform, interactables, hidden, player);
         SetupBackgroundSet(sceneRoot, background, hidden);
+        DisableFullScreenLanternVisionArtifacts();
         ForceRealityView(sceneRoot, background, hidden);
     }
 
@@ -395,6 +397,7 @@ public static class Chapter1VisualRuntimeFix
     private static void SetupSpriteLayers(Transform hidden, Transform interactables, Transform vfx, GameObject player)
     {
         float playerHeight = player != null ? 2.64f * player.transform.localScale.y : 2.9f;
+        bool mourningHall = SceneManager.GetActiveScene().name == "Chapter1_MourningHall";
         foreach (SpriteRenderer renderer in Object.FindObjectsOfType<SpriteRenderer>(true))
         {
             string objectName = renderer.gameObject.name;
@@ -412,6 +415,12 @@ public static class Chapter1VisualRuntimeFix
 
             if (objectName.Contains("PaperEffigy_Normal") || objectName == "PaperEffigy")
             {
+                if (!mourningHall)
+                {
+                    renderer.gameObject.SetActive(false);
+                    continue;
+                }
+
                 renderer.sortingLayerName = "Props";
                 renderer.sortingOrder = 30;
                 SetAlpha(renderer, 1f);
@@ -434,6 +443,10 @@ public static class Chapter1VisualRuntimeFix
                     renderer.transform.SetParent(hidden, true);
                 }
                 ScaleToHeight(renderer, playerHeight * 1.05f);
+                if (!IsFullScreenLanternVisionArtifact(objectName) && renderer.GetComponent<HiddenInLanternView>() == null)
+                {
+                    renderer.gameObject.AddComponent<HiddenInLanternView>();
+                }
                 renderer.gameObject.SetActive(false);
                 continue;
             }
@@ -489,11 +502,7 @@ public static class Chapter1VisualRuntimeFix
         }
 
         GameObject overlay = FindOrCreateUi(canvas.transform, "LanternVisionOverlay_UI");
-        Image overlayImage = overlay.GetComponent<Image>() ?? overlay.AddComponent<Image>();
-        overlayImage.color = new Color(1f, 1f, 1f, 0.32f);
-        overlayImage.raycastTarget = false;
-        Stretch(overlay.GetComponent<RectTransform>());
-        overlay.SetActive(false);
+        DisableLanternVisionOverlayUi(overlay);
 
         GameObject vignette = FindOrCreateUi(canvas.transform, "VignetteOverlay");
         vignette.SetActive(false);
@@ -548,13 +557,13 @@ public static class Chapter1VisualRuntimeFix
         promptRect.anchorMax = new Vector2(0.5f, 0f);
         promptRect.pivot = new Vector2(0.5f, 0.5f);
         promptRect.anchoredPosition = new Vector2(0f, 245f);
-        promptRect.sizeDelta = new Vector2(128f, 56f);
+        promptRect.sizeDelta = new Vector2(178f, 56f);
 
         GameObject promptLabel = FindOrCreateUi(prompt.transform, "InteractionPromptText");
         Text promptText = promptLabel.GetComponent<Text>() ?? promptLabel.AddComponent<Text>();
-        promptText.text = "E";
+        promptText.text = "[E] \u4e92\u52a8";
         promptText.font = Resources.GetBuiltinResource<Font>("Arial.ttf");
-        promptText.fontSize = 30;
+        promptText.fontSize = 24;
         promptText.fontStyle = FontStyle.Bold;
         promptText.alignment = TextAnchor.MiddleCenter;
         promptText.color = new Color(0.95f, 0.9f, 0.76f, 1f);
@@ -696,7 +705,7 @@ public static class Chapter1VisualRuntimeFix
         inventoryPanel.SetActive(false);
 
         UIManager uiManager = canvas.GetComponent<UIManager>() ?? canvas.AddComponent<UIManager>();
-        uiManager.Configure(prompt, overlay, dialogueRoot, inventoryPanel, endingPanel, qHintText);
+        uiManager.Configure(prompt, null, dialogueRoot, inventoryPanel, endingPanel, qHintText);
     }
 
     private static string GetChapterTitle(string sceneName)
@@ -1081,14 +1090,27 @@ public static class Chapter1VisualRuntimeFix
         OfferingPuzzleManager puzzle = sceneRoot.GetComponent<OfferingPuzzleManager>() ?? sceneRoot.gameObject.AddComponent<OfferingPuzzleManager>();
 
         GameObject afterimageFlash = FindExistingOrCreate(hiddenParent, "CommonVFX_AfterimageFlash_MourningHall", "AfterimageFlash");
-        GameObject grandmaAfterimage = FindExistingOrCreate(hiddenParent, "GrandmaAfterimage_MourningHall", "Content_PaperEffigy_Altered_MourningHall");
+        GameObject grandmaAfterimage = FindExistingOrCreate(hiddenParent, "GrandmaGhost", "GrandmotherShadow");
+        ConfigureGrandmaGhost(grandmaAfterimage);
         SpriteRenderer candleRenderer = FindSpriteRenderer("Content_WhiteCandle_Unlit");
         Sprite litCandleSprite = LoadSprite("Assets/Art/Props/Offerings/27_white_candle_lit.png");
         ItemData litItem = LoadItem("Assets/ScriptableObjects/Items/BlackLantern_Lit.asset");
 
         ConfigureMourningHallHiddenObject(afterimageFlash, "VFX", 85, 0.75f, false);
         ConfigureMourningHallHiddenObject(grandmaAfterimage, "Ghost", 40, 0.48f, false);
+        if (grandmaAfterimage.GetComponent<HiddenInLanternView>() == null)
+        {
+            grandmaAfterimage.AddComponent<HiddenInLanternView>();
+        }
         puzzle.Configure(litItem, afterimageFlash, grandmaAfterimage, candleRenderer, litCandleSprite);
+        puzzle.ConfigureOfferingSprites(new[]
+        {
+            LoadSprite("Assets/Art/Props/Offerings/22_apple_single.png"),
+            LoadSprite("Assets/Art/Props/Offerings/23_pastry_single.png"),
+            LoadSprite("Assets/Art/Props/Offerings/24_wine_cup_single.png"),
+            LoadSprite("Assets/Art/Props/Offerings/25_incense_burner_single.png"),
+            LoadSprite("Assets/Art/Props/Offerings/26_white_candle_unlit.png")
+        });
 
         EnsureMourningHallOfferingVisual(interactableParent, "Content_Offering_Apple", "Assets/Art/Props/Offerings/22_apple_single.png", new Vector3(-1.15f, -1.55f, 0f), 22, 0.28f);
         EnsureMourningHallOfferingVisual(interactableParent, "Content_Offering_Pastry", "Assets/Art/Props/Offerings/23_pastry_single.png", new Vector3(-0.35f, -1.55f, 0f), 22, 0.28f);
@@ -1119,14 +1141,20 @@ public static class Chapter1VisualRuntimeFix
         BindOfferingPair(winePickup, winePlace);
         BindOfferingPair(incensePickup, incensePlace);
         BindOfferingPair(candlePickup, candlePlace);
+        SetLegacyOfferingInteractablesActive(false, applePickup, cakePickup, winePickup, incensePickup, candlePickup, applePlace, cakePlace, winePlace, incensePlace, candlePlace);
 
-        CreateInteractable(
-            interactableParent,
-            "OfferingTable_Interactable",
-            new Vector3(0f, -1.18f, 0f),
-            new Vector2(3.8f, 0.45f),
-            "mourning_hall_offering_table",
-            new[] { "\u6797\u7167\u8424\uff1a\u4f9b\u684c\u4e0a\u7684\u4f4d\u7f6e\u662f\u7a7a\u7684\uff0c\u50cf\u662f\u5728\u7b49\u4ec0\u4e48\u3002" });
+        GameObject offeringTable = FindOrCreateSceneChild(interactableParent, "OfferingTable_Interactable");
+        offeringTable.transform.position = new Vector3(0f, -1.18f, 0f);
+        BoxCollider2D offeringTableCollider = EnsureBoxCollider2D(offeringTable);
+        offeringTableCollider.isTrigger = true;
+        offeringTableCollider.size = new Vector2(3.8f, 0.85f);
+        InteractableObject tableDialogue = offeringTable.GetComponent<InteractableObject>();
+        if (tableDialogue != null)
+        {
+            Object.Destroy(tableDialogue);
+        }
+        OfferingPuzzleTableInteractable tableInteractable = offeringTable.GetComponent<OfferingPuzzleTableInteractable>() ?? offeringTable.AddComponent<OfferingPuzzleTableInteractable>();
+        tableInteractable.Configure(puzzle);
 
         CreateInteractable(
             interactableParent,
@@ -1147,13 +1175,13 @@ public static class Chapter1VisualRuntimeFix
 
             if (text != null)
             {
-                text.text = "\u679c\u3001\u7cd5\u3001\u9152\u3001\u9999\u3001\u706b\u3002";
-                text.fontSize = 1.25f;
+                text.text = "\u679c \u2192 \u7cd5 \u2192 \u9152 \u2192 \u9999 \u2192 \u706b";
+                text.fontSize = 1.18f;
                 text.alignment = TextAlignmentOptions.Center;
-                text.color = new Color(0.78f, 0.88f, 0.78f, 0.48f);
+                text.color = new Color(0.84f, 0.94f, 0.9f, 0.58f);
             }
 
-            hiddenText.transform.position = new Vector3(0f, -0.55f, 0f);
+            hiddenText.transform.position = new Vector3(0f, -0.78f, 0f);
             if (hiddenText.GetComponent<HiddenInLanternView>() == null)
             {
                 hiddenText.AddComponent<HiddenInLanternView>();
@@ -1228,6 +1256,24 @@ public static class Chapter1VisualRuntimeFix
             null,
             LoadSprite(iconPath));
         return item;
+    }
+
+    private static void SetLegacyOfferingInteractablesActive(bool active, params GameObject[] items)
+    {
+        if (items == null)
+        {
+            return;
+        }
+
+        foreach (GameObject item in items)
+        {
+            if (item != null)
+            {
+                item.SetActive(active);
+            }
+        }
+
+        Debug.Log("[Chapter1Offering] Legacy per-item offering interactables active = " + active);
     }
 
     private static GameObject SetupOfferingPlace(
@@ -1355,6 +1401,42 @@ public static class Chapter1VisualRuntimeFix
         {
             target.AddComponent<HiddenInLanternView>();
         }
+    }
+
+    private static void ConfigureGrandmaGhost(GameObject target)
+    {
+        if (target == null)
+        {
+            return;
+        }
+
+        target.name = "GrandmaGhost";
+        SpriteRenderer renderer = target.GetComponent<SpriteRenderer>();
+        if (renderer == null)
+        {
+            renderer = target.AddComponent<SpriteRenderer>();
+            Debug.Log("[Chapter1MourningHall] Added SpriteRenderer to GrandmaGhost.");
+        }
+
+        if (renderer.sprite == null)
+        {
+            renderer.sprite = LoadSprite("Assets/Art/Characters/Ghosts/13_grandmother_afterimage.png");
+        }
+
+        target.transform.position = new Vector3(0.15f, -1.18f, 0f);
+        target.transform.localRotation = Quaternion.identity;
+        renderer.sortingLayerName = "Ghost";
+        renderer.sortingOrder = 43;
+        SetAlpha(renderer, 0.54f);
+        ScaleToHeight(renderer, 1.55f);
+
+        if (target.GetComponent<HiddenInLanternView>() == null)
+        {
+            target.AddComponent<HiddenInLanternView>();
+        }
+
+        target.SetActive(false);
+        Debug.Log("[Chapter1MourningHall] GrandmaGhost positioned at " + target.transform.position);
     }
 
     private static void ConfigureMourningHallHiddenObject(GameObject target, string sortingLayer, int order, float alpha, bool active)
@@ -1499,7 +1581,6 @@ public static class Chapter1VisualRuntimeFix
         switch (sceneName)
         {
             case "Chapter1_TownGate":
-                RequireSceneObject(sceneName, "Content_PaperEffigy_Normal");
                 RequireSceneObject(sceneName, "Content_HiddenText_TownGate");
                 break;
             case "Chapter1_StoneBridge":
@@ -1622,13 +1703,83 @@ public static class Chapter1VisualRuntimeFix
         GameObject overlay = GameObject.Find("LanternVisionOverlay_UI");
         if (overlay != null)
         {
-            overlay.SetActive(false);
+            DisableLanternVisionOverlayUi(overlay);
         }
 
         LanternVisionController controller = sceneRoot.GetComponent<LanternVisionController>();
         if (controller != null)
         {
             controller.SetLanternVision(false);
+        }
+    }
+
+    private static void DisableFullScreenLanternVisionArtifacts()
+    {
+        foreach (Transform transform in Object.FindObjectsOfType<Transform>(true))
+        {
+            if (transform == null || !transform.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            string objectName = transform.name;
+            if (objectName.Contains("LanternOverlay") ||
+                objectName.Contains("LanternVisionImage") ||
+                objectName.Contains("FullScreenLantern") ||
+                objectName.Contains("CrackFrame") ||
+                objectName.Contains("GhostOverlay") ||
+                objectName.Contains("LanternZoomImage") ||
+                objectName.Contains("CommonVFX_VignetteOverlay") ||
+                objectName.Contains("VignetteOverlay") ||
+                objectName.Contains("lantern_vision_filter"))
+            {
+                transform.gameObject.SetActive(false);
+                Debug.Log("[Chapter1LanternVision] Disabled full-screen artifact: " + objectName);
+            }
+        }
+    }
+
+    private static bool IsFullScreenLanternVisionArtifact(string objectName)
+    {
+        return objectName.Contains("LanternOverlay") ||
+            objectName.Contains("LanternVisionImage") ||
+            objectName.Contains("FullScreenLantern") ||
+            objectName.Contains("CrackFrame") ||
+            objectName.Contains("GhostOverlay") ||
+            objectName.Contains("LanternZoomImage") ||
+            objectName.Contains("CommonVFX_VignetteOverlay") ||
+            objectName.Contains("VignetteOverlay") ||
+            objectName.Contains("lantern_vision_filter");
+    }
+
+    private static void CleanupPaperEffigiesOutsideMourningHall()
+    {
+        bool mourningHall = SceneManager.GetActiveScene().name == "Chapter1_MourningHall";
+        foreach (Transform transform in Object.FindObjectsOfType<Transform>(true))
+        {
+            if (transform == null || !transform.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            string objectName = transform.name;
+            bool paperEffigy = objectName.Contains("PaperEffigy") ||
+                objectName.Contains("PaperMan") ||
+                objectName == "PaperEffigy";
+            if (!paperEffigy || mourningHall)
+            {
+                continue;
+            }
+
+            if (transform.gameObject.scene.name == "DontDestroyOnLoad")
+            {
+                Object.Destroy(transform.gameObject);
+                Debug.Log("[Chapter1SceneCleanup] Destroyed DontDestroyOnLoad paper effigy: " + objectName);
+                continue;
+            }
+
+            transform.gameObject.SetActive(false);
+            Debug.Log("[Chapter1SceneCleanup] Disabled paper effigy outside MourningHall: " + objectName + " in " + transform.gameObject.scene.name);
         }
     }
 
@@ -1644,6 +1795,37 @@ public static class Chapter1VisualRuntimeFix
         created.transform.SetParent(parent, false);
         created.AddComponent<RectTransform>();
         return created;
+    }
+
+    private static void DisableLanternVisionOverlayUi(GameObject overlay)
+    {
+        if (overlay == null)
+        {
+            return;
+        }
+
+        Image image = overlay.GetComponent<Image>();
+        if (image != null)
+        {
+            image.sprite = null;
+            image.raycastTarget = false;
+            image.color = Color.clear;
+        }
+
+        Button button = overlay.GetComponent<Button>();
+        if (button != null)
+        {
+            Object.Destroy(button);
+        }
+
+        CanvasRenderer canvasRenderer = overlay.GetComponent<CanvasRenderer>();
+        if (canvasRenderer != null)
+        {
+            canvasRenderer.SetAlpha(0f);
+        }
+
+        overlay.SetActive(false);
+        Debug.Log("[Chapter1LanternVision] LanternVisionOverlay_UI disabled; LanternVision_BG is used instead.");
     }
 
     private static GameObject FindObjectIncludingInactive(string objectName)

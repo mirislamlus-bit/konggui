@@ -6,11 +6,18 @@ public sealed class GameStateManager : MonoBehaviour
 
     public bool hasBlackLantern;
     public bool isBlackLanternLit;
+    public bool isLanternVision;
     public bool offeringPuzzleSolved;
     public bool hasSeenNamedRiverLantern;
     public bool hasVisitedTownGate;
     public bool hasCheckedNormalRiverLantern;
     public bool hasCompletedWellEnding;
+
+    public bool chapterOneEndingTriggered
+    {
+        get => hasCompletedWellEnding;
+        set => hasCompletedWellEnding = value;
+    }
 
     public bool oldWellPuzzleSolved
     {

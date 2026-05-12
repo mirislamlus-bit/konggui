@@ -3,7 +3,7 @@ using UnityEngine;
 
 public sealed class OfferingPuzzleManager : MonoBehaviour
 {
-    [SerializeField] private string[] correctOrder =
+    private readonly string[] correctOrder =
     {
         "Offering_Apple",
         "Offering_Cake",
@@ -17,18 +17,83 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
     [SerializeField] private GameObject grandmaAfterimage;
     [SerializeField] private SpriteRenderer candleRenderer;
     [SerializeField] private Sprite litCandleSprite;
+    [SerializeField] private Sprite[] offeringSprites;
 
     private readonly Dictionary<int, string> slotToOffering = new Dictionary<int, string>();
     private readonly List<string> heldOfferings = new List<string>();
+    private readonly Dictionary<string, ItemData> runtimeOfferingItems = new Dictionary<string, ItemData>();
+    private OfferingPuzzleUI activePuzzleUi;
 
-    public bool SlotHasOffering(int slotIndex, string offeringId = null)
+    public void Configure(ItemData litItem, GameObject flash, GameObject afterimage, SpriteRenderer candle, Sprite litCandle)
     {
-        if (!slotToOffering.TryGetValue(slotIndex, out string currentOffering))
+        litBlackLanternItem = litItem != null ? litItem : litBlackLanternItem;
+        afterimageFlash = flash != null ? flash : afterimageFlash;
+        grandmaAfterimage = afterimage != null ? afterimage : grandmaAfterimage;
+        candleRenderer = candle != null ? candle : candleRenderer;
+        litCandleSprite = litCandle != null ? litCandle : litCandleSprite;
+    }
+
+    public void ConfigureOfferingSprites(Sprite[] sprites)
+    {
+        offeringSprites = sprites;
+    }
+
+    public void OpenPuzzleUi()
+    {
+        GameStateManager state = GameStateManager.EnsureInstance();
+        if (state.offeringPuzzleSolved)
         {
+            DialogueManager.Show("\u9ed1\u706f\u5df2\u7ecf\u70b9\u8d77\u6765\u4e86\u3002");
+            return;
+        }
+
+        if (activePuzzleUi == null)
+        {
+            activePuzzleUi = OfferingPuzzleUI.Create(this, offeringSprites);
+        }
+
+        activePuzzleUi.Open();
+        Debug.Log("[Chapter1Offering] Offering puzzle UI opened.");
+    }
+
+    public bool TrySolveUiOrder(string[] order)
+    {
+        if (order == null || order.Length != correctOrder.Length)
+        {
+            DialogueManager.Show("\u4f9b\u54c1\u8fd8\u6ca1\u6709\u6446\u5b8c\u3002");
+            Debug.Log("[Chapter1Offering] Confirm failed: incomplete order.");
             return false;
         }
 
-        return string.IsNullOrEmpty(offeringId) || currentOffering == offeringId;
+        for (int i = 0; i < correctOrder.Length; i++)
+        {
+            if (order[i] != correctOrder[i])
+            {
+                DialogueManager.Show("\u987a\u5e8f\u4e0d\u5bf9\u3002");
+                Debug.Log("[Chapter1Offering] Confirm failed at slot " + i + ": " + order[i]);
+                return false;
+            }
+        }
+
+        Solve(GameStateManager.EnsureInstance());
+        if (activePuzzleUi != null)
+        {
+            activePuzzleUi.Close();
+        }
+
+        Debug.Log("[Chapter1Offering] Offering puzzle solved from drag UI.");
+        return true;
+    }
+
+    public void RegisterInitialOffering(int slotIndex, string offeringId)
+    {
+        slotToOffering[slotIndex] = offeringId;
+    }
+
+    public bool SlotHasOffering(int slotIndex, string offeringId = null)
+    {
+        return slotToOffering.TryGetValue(slotIndex, out string currentOffering) &&
+            (string.IsNullOrEmpty(offeringId) || currentOffering == offeringId);
     }
 
     public bool SlotIsEmpty(int slotIndex)
@@ -46,111 +111,16 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
         return heldOfferings.Contains(offeringId);
     }
 
-    public void Configure(ItemData litItem, GameObject flash, GameObject afterimage, SpriteRenderer candle, Sprite litCandle)
-    {
-        litBlackLanternItem = litItem != null ? litItem : litBlackLanternItem;
-        afterimageFlash = flash != null ? flash : afterimageFlash;
-        grandmaAfterimage = afterimage != null ? afterimage : grandmaAfterimage;
-        candleRenderer = candle != null ? candle : candleRenderer;
-        litCandleSprite = litCandle != null ? litCandle : litCandleSprite;
-    }
-
-    public void RegisterInitialOffering(int slotIndex, string offeringId)
-    {
-        slotToOffering[slotIndex] = offeringId;
-    }
-
     public bool TryPickUpOffering(int slotIndex, string offeringId, Sprite icon = null)
     {
-        GameStateManager state = GameStateManager.EnsureInstance();
-        if (state.offeringPuzzleSolved)
-        {
-            DialogueManager.Show("黑灯已经点起来了。");
-            return false;
-        }
-
-        if (!slotToOffering.TryGetValue(slotIndex, out string currentOffering) || currentOffering != offeringId)
-        {
-            DialogueManager.Show("这里现在没有这个供品。");
-            return false;
-        }
-
-        if (heldOfferings.Count >= 2)
-        {
-            DialogueManager.Show("一次最多只能拿两个供品。");
-            return false;
-        }
-
-        ItemData item = GetOrCreateOfferingItem(offeringId, icon);
-        if (InventoryManager.Instance != null && !InventoryManager.Instance.HasItem(item.itemId))
-        {
-            InventoryManager.Instance.AddItem(item);
-        }
-
-        heldOfferings.Add(offeringId);
-        slotToOffering.Remove(slotIndex);
-        DialogueManager.Show("拾取了供品。");
-        return true;
+        DialogueManager.Show("\u8bf7\u5728\u653e\u5927\u7684\u4f9b\u684c\u4e0a\u91cd\u65b0\u6446\u653e\u4f9b\u54c1\u3002");
+        return false;
     }
 
     public bool TryPlaceOffering(int slotIndex, string offeringId)
     {
-        GameStateManager state = GameStateManager.EnsureInstance();
-        if (state.offeringPuzzleSolved)
-        {
-            DialogueManager.Show("黑灯已经点起来了。");
-            return false;
-        }
-
-        if (slotToOffering.ContainsKey(slotIndex))
-        {
-            DialogueManager.Show("这个位置已经有供品了。");
-            return false;
-        }
-
-        if (!HasHeldOffering(offeringId))
-        {
-            DialogueManager.Show("先拿起这个供品。");
-            return false;
-        }
-
-        slotToOffering[slotIndex] = offeringId;
-        RemoveHeldOffering(offeringId);
-        RemoveOfferingFromInventory(offeringId);
-
-        if (IsSolved())
-        {
-            Solve(state);
-        }
-        else
-        {
-            DialogueManager.Show("供桌微微一震。");
-        }
-
-        return true;
-    }
-
-    private bool IsSolved()
-    {
-        for (int i = 0; i < correctOrder.Length; i++)
-        {
-            if (!slotToOffering.TryGetValue(i, out string currentOffering) || currentOffering != correctOrder[i])
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    private bool HasHeldOffering(string offeringId)
-    {
-        return heldOfferings.Contains(offeringId);
-    }
-
-    private void RemoveHeldOffering(string offeringId)
-    {
-        heldOfferings.Remove(offeringId);
+        DialogueManager.Show("\u8bf7\u5728\u653e\u5927\u7684\u4f9b\u684c\u4e0a\u91cd\u65b0\u6446\u653e\u4f9b\u54c1\u3002");
+        return false;
     }
 
     private void Solve(GameStateManager state)
@@ -158,6 +128,8 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
         state.hasBlackLantern = true;
         state.offeringPuzzleSolved = true;
         state.isBlackLanternLit = true;
+        Debug.Log("[Chapter1State] offeringPuzzleSolved = true");
+        Debug.Log("[Chapter1State] isBlackLanternLit = true");
 
         if (litBlackLanternItem == null)
         {
@@ -169,10 +141,12 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
             if (InventoryManager.Instance.HasItem("BlackLantern_Unlit"))
             {
                 InventoryManager.Instance.ReplaceItem("BlackLantern_Unlit", litBlackLanternItem);
+                Debug.Log("[Chapter1Inventory] Replaced BlackLantern_Unlit with BlackLantern_Lit.");
             }
             else if (!InventoryManager.Instance.HasItem(litBlackLanternItem.itemId))
             {
                 InventoryManager.Instance.AddItem(litBlackLanternItem);
+                Debug.Log("[Chapter1Inventory] Added BlackLantern_Lit.");
             }
         }
 
@@ -195,71 +169,10 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
         {
             DialogueManager.Instance.ShowDialogue(new[]
             {
-                "外婆残影：灯点起来，才能看见被藏住的名字。",
-                "林照萤：外婆……？",
-                "外婆残影：去井边。",
-                "黑灯已点燃。",
-                "按 Q 可进入完整灯影视角。"
+                "\u5916\u5a46\u6b8b\u5f71\uff1a\u706f\u70b9\u8d77\u6765\uff0c\u624d\u80fd\u770b\u89c1\u88ab\u85cf\u4f4f\u7684\u540d\u5b57\u3002",
+                "\u6797\u7167\u8424\uff1a\u5916\u5a46\u2026\u2026\uff1f",
+                "\u5916\u5a46\u6b8b\u5f71\uff1a\u53bb\u4e95\u8fb9\u3002"
             });
-        }
-    }
-
-    private readonly Dictionary<string, ItemData> runtimeOfferingItems = new Dictionary<string, ItemData>();
-
-    private ItemData GetOrCreateOfferingItem(string offeringId, Sprite icon)
-    {
-        if (runtimeOfferingItems.TryGetValue(offeringId, out ItemData existing) && existing != null)
-        {
-            return existing;
-        }
-
-        ItemData item = ScriptableObject.CreateInstance<ItemData>();
-        item.itemId = offeringId + "_Inventory";
-        item.itemType = ItemType.Story;
-        item.icon = icon;
-
-        switch (offeringId)
-        {
-            case "Offering_Apple":
-                item.itemName = "苹果";
-                item.description = "灵堂供桌上的苹果。";
-                break;
-            case "Offering_Cake":
-                item.itemName = "糕点";
-                item.description = "灵堂供桌上的糕点。";
-                break;
-            case "Offering_WineCup":
-                item.itemName = "酒杯";
-                item.description = "灵堂供桌上的酒杯。";
-                break;
-            case "Offering_IncenseBurner":
-                item.itemName = "香炉";
-                item.description = "灵堂供桌上的香炉。";
-                break;
-            case "Offering_Candle":
-                item.itemName = "白蜡烛";
-                item.description = "灵堂供桌上的白蜡烛。";
-                break;
-            default:
-                item.itemName = offeringId;
-                item.description = "供品。";
-                break;
-        }
-
-        runtimeOfferingItems[offeringId] = item;
-        return item;
-    }
-
-    private void RemoveOfferingFromInventory(string offeringId)
-    {
-        if (InventoryManager.Instance == null)
-        {
-            return;
-        }
-
-        if (runtimeOfferingItems.TryGetValue(offeringId, out ItemData item) && item != null)
-        {
-            InventoryManager.Instance.RemoveItem(item.itemId);
         }
     }
 
@@ -267,8 +180,8 @@ public sealed class OfferingPuzzleManager : MonoBehaviour
     {
         ItemData item = ScriptableObject.CreateInstance<ItemData>();
         item.itemId = "BlackLantern_Lit";
-        item.itemName = "黑灯（已点燃）";
-        item.description = "灯芯亮起后，黑灯能照见被藏住的名字。";
+        item.itemName = "\u9ed1\u706f\uff08\u5df2\u70b9\u71c3\uff09";
+        item.description = "\u706f\u82af\u4eae\u8d77\u540e\uff0c\u9ed1\u706f\u80fd\u7167\u89c1\u88ab\u85cf\u4f4f\u7684\u540d\u5b57\u3002";
         item.itemType = ItemType.Lantern;
         return item;
     }

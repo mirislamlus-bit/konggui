@@ -90,15 +90,23 @@ public sealed class LampViewController : MonoBehaviour
         SetActive(realityBackground, !lampViewEnabled);
         SetActive(weakBackground, weakEnabled);
         SetActive(fullBackground, fullEnabled);
-        SetActive(weakOverlay, weakEnabled);
-        SetActive(fullOverlay, fullEnabled);
+        SetActive(weakOverlay, false);
+        SetActive(fullOverlay, false);
         ApplyGroup(weakLampObjects, weakEnabled);
         ApplyGroup(fullLampObjects, fullEnabled);
+        DisableFullScreenArtifacts();
 
         LanternVisionController lanternVision = GetComponent<LanternVisionController>();
         if (lanternVision != null)
         {
             lanternVision.SetLanternVision(lampViewEnabled);
+        }
+
+        GameStateManager state = GameStateManager.Instance;
+        if (state != null)
+        {
+            state.isLanternVision = lampViewEnabled;
+            Debug.Log("[Chapter1State] isLanternVision = " + state.isLanternVision + ", lampViewState = " + currentState);
         }
     }
 
@@ -131,6 +139,31 @@ public sealed class LampViewController : MonoBehaviour
         if (target != null)
         {
             target.SetActive(active);
+        }
+    }
+
+    private static void DisableFullScreenArtifacts()
+    {
+        foreach (Transform transform in FindObjectsOfType<Transform>(true))
+        {
+            if (transform == null || !transform.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            string objectName = transform.name;
+            if (objectName.Contains("LanternOverlay") ||
+                objectName.Contains("LanternVisionImage") ||
+                objectName.Contains("FullScreenLantern") ||
+                objectName.Contains("CrackFrame") ||
+                objectName.Contains("GhostOverlay") ||
+                objectName.Contains("LanternZoomImage") ||
+                objectName.Contains("CommonVFX_VignetteOverlay") ||
+                objectName.Contains("VignetteOverlay") ||
+                objectName.Contains("lantern_vision_filter"))
+            {
+                transform.gameObject.SetActive(false);
+            }
         }
     }
 }

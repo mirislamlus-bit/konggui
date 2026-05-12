@@ -46,6 +46,12 @@ public sealed class SceneBackgroundSet : MonoBehaviour
         foreach (Transform child in hiddenObjects.GetComponentsInChildren<Transform>(true))
         {
             string objectName = child.name;
+            if (IsDisabledLanternVisionArtifact(objectName))
+            {
+                child.gameObject.SetActive(false);
+                continue;
+            }
+
             if (objectName.Contains("NameInWellEffect") ||
                 objectName.Contains("WaterReflection_Effect") ||
                 objectName.Contains("WaterReflection_OldWell") ||
@@ -57,7 +63,7 @@ public sealed class SceneBackgroundSet : MonoBehaviour
 
             if (objectName.Contains("AfterimageFlash_MourningHall"))
             {
-                child.gameObject.SetActive(lanternVisionEnabled && offeringPuzzleSolved);
+                child.gameObject.SetActive(false);
             }
             else if (objectName.Contains("AfterimageFlash_OldWell"))
             {
@@ -68,7 +74,9 @@ public sealed class SceneBackgroundSet : MonoBehaviour
                 child.gameObject.SetActive(false);
             }
 
-            if (objectName.Contains("GrandmaAfterimage_MourningHall"))
+            if (objectName.Contains("GrandmaAfterimage_MourningHall") ||
+                objectName.Contains("GrandmaGhost") ||
+                objectName.Contains("GrandmotherShadow"))
             {
                 child.gameObject.SetActive(lanternVisionEnabled && offeringPuzzleSolved);
             }
@@ -84,5 +92,42 @@ public sealed class SceneBackgroundSet : MonoBehaviour
                 child.gameObject.SetActive(lanternVisionEnabled && blackLanternLit && hasSeenNamedRiverLantern);
             }
         }
+
+        ApplyRiverLanternSwap(lanternVisionEnabled && blackLanternLit);
+    }
+
+    private static void ApplyRiverLanternSwap(bool showNamedLantern)
+    {
+        foreach (Transform transform in FindObjectsOfType<Transform>(true))
+        {
+            if (!transform.gameObject.scene.IsValid())
+            {
+                continue;
+            }
+
+            string objectName = transform.name;
+            if (objectName.Contains("RiverLantern_Normal") || objectName.Contains("Content_RiverLantern_Normal"))
+            {
+                transform.gameObject.SetActive(!showNamedLantern);
+            }
+            else if (objectName.Contains("RiverLantern_Named") || objectName.Contains("Content_RiverLantern_Named_LanternOnly"))
+            {
+                transform.gameObject.SetActive(showNamedLantern);
+            }
+        }
+
+        Debug.Log("[Chapter1State] River lantern view swapped. namedVisible = " + showNamedLantern);
+    }
+
+    private static bool IsDisabledLanternVisionArtifact(string objectName)
+    {
+        return objectName.Contains("LanternOverlay") ||
+            objectName.Contains("LanternVisionImage") ||
+            objectName.Contains("FullScreenLantern") ||
+            objectName.Contains("CrackFrame") ||
+            objectName.Contains("GhostOverlay") ||
+            objectName.Contains("LanternZoomImage") ||
+            objectName.Contains("Vignette") ||
+            objectName.Contains("lantern_vision_filter");
     }
 }

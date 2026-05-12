@@ -1,5 +1,4 @@
 using UnityEngine;
-using UnityEngine.SceneManagement;
 using UnityEngine.UI;
 
 public sealed class DialogueManager : MonoBehaviour
@@ -48,6 +47,7 @@ public sealed class DialogueManager : MonoBehaviour
         {
             Instance.ShowDialogue(new[] { line });
         }
+
         Debug.Log(line);
     }
 
@@ -96,10 +96,12 @@ public sealed class DialogueManager : MonoBehaviour
         {
             dialogueText.text = string.Empty;
         }
+
         if (speakerNameText != null)
         {
             speakerNameText.text = string.Empty;
         }
+
         if (dialogueRoot != null)
         {
             dialogueRoot.SetActive(false);
@@ -114,6 +116,7 @@ public sealed class DialogueManager : MonoBehaviour
         {
             dialogueRoot.SetActive(true);
         }
+
         if (dialogueText != null && currentLines != null && currentIndex < currentLines.Length)
         {
             SetDialogueText(currentLines[currentIndex]);
@@ -122,13 +125,19 @@ public sealed class DialogueManager : MonoBehaviour
 
     private void SetDialogueText(string line)
     {
-        int separator = line.IndexOf('：');
+        int separator = line.IndexOf('\uff1a');
+        if (separator < 0)
+        {
+            separator = line.IndexOf(':');
+        }
+
         if (separator > 0)
         {
             if (speakerNameText != null)
             {
                 speakerNameText.text = line.Substring(0, separator);
             }
+
             dialogueText.text = line.Substring(separator + 1);
             return;
         }
@@ -137,6 +146,7 @@ public sealed class DialogueManager : MonoBehaviour
         {
             speakerNameText.text = string.Empty;
         }
+
         dialogueText.text = line;
     }
 
