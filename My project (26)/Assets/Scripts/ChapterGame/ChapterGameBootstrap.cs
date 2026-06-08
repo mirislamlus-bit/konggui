@@ -14,16 +14,23 @@ namespace ChapterGame
 {
     public sealed class ChapterGameBootstrap : MonoBehaviour
     {
-        private const string Chapter1Folder = "Assets/素材和策划案/第一章/";
+        private const string Chapter1Folder = "Assets/第一章/";
         private const string Chapter2Folder = "Assets/素材和策划案/第二章/";
         private const string Chapter3Folder = "Assets/素材和策划案/第三章/";
         private const string Chapter4Folder = "Assets/素材和策划案/第四章/";
         private const string UiFolder = "Assets/素材和策划案/UI设计/";
         private const string MainMenuFolder = "Assets/素材和策划案/主菜单/";
         private const string CharacterFolder = "Assets/素材和策划案/角色动作/";
+        private const string InteractionPromptPath = "Assets/素材和策划案/第一章/UI/48_e_interaction_prompt.png";
         private const string BgmPath = "Assets/BGM.mp3";
         private const float PlayerIdleWidth = 143.31f;
         private const float PlayerIdleHeight = 430f;
+        private const float Chapter2DoorLanternMinX = 0.36f;
+        private const float Chapter2DoorLanternMaxX = 0.64f;
+        private const string BoundaryBlocked = "__blocked";
+        private const int SpawnDefault = 0;
+        private const int SpawnLeft = -1;
+        private const int SpawnRight = 1;
 
         private readonly Dictionary<string, ChapterDefinition> chapters = new Dictionary<string, ChapterDefinition>();
         private readonly Dictionary<string, SceneDefinition> scenes = new Dictionary<string, SceneDefinition>();
@@ -45,6 +52,7 @@ namespace ChapterGame
         private Text messageText;
         private Text inventoryText;
         private Text lightText;
+        private Image boundaryPromptImage;
         private GameObject modal;
         private Text modalTitle;
         private Text modalBody;
@@ -81,6 +89,10 @@ namespace ChapterGame
         private string currentChapterId;
         private string currentSceneId;
         private string selectedLamp;
+        private string boundaryNavigationTargetSceneId;
+        private string boundaryNavigationBlockedMessage;
+        private int boundaryNavigationSpawnSide = SpawnDefault;
+        private int boundaryNavigationSide = SpawnDefault;
         private HotspotDefinition currentHoverHotspot;
         private readonly List<string> offeringPuzzleInput = new List<string>();
         private readonly List<RuntimeVfx> activeVfx = new List<RuntimeVfx>();
@@ -99,8 +111,10 @@ namespace ChapterGame
         private float sceneHeight = 1080f;
         private float cameraX;
         private float targetCameraX;
+        private float nextBoundaryBlockMessageTime;
         private bool inputLocked;
         private bool sceneReady = true;
+        private int pendingSpawnSide = SpawnDefault;
         private Coroutine transitionCoroutine;
         private AudioSource bgmSource;
 
@@ -193,6 +207,12 @@ namespace ChapterGame
                 HideGenericPuzzle();
             }
 
+            UpdateBoundaryNavigationPrompt();
+            if (Input.GetKeyDown(KeyCode.E) && TryActivateBoundaryNavigation())
+            {
+                return;
+            }
+
             if (Input.GetKeyDown(KeyCode.E) && !modal.activeSelf && !dialoguePanel.activeSelf && (maskPuzzlePanel == null || !maskPuzzlePanel.activeSelf) && (genericPuzzlePanel == null || !genericPuzzlePanel.activeSelf) && currentHoverHotspot != null)
             {
                 InvokeHotspot(currentHoverHotspot);
@@ -204,6 +224,7 @@ namespace ChapterGame
             }
 
             UpdatePlayer(Time.deltaTime);
+            UpdateBoundaryNavigationPrompt();
             UpdateCamera(Time.deltaTime);
         }
 
@@ -300,6 +321,16 @@ namespace ChapterGame
 
             inventoryText = CreateText("Inventory", bottom, 21, TextAnchor.MiddleRight);
             Anchor(inventoryText.rectTransform, new Vector2(0.74f, 0), new Vector2(1, 1), new Vector2(10, 10), new Vector2(-34, -10));
+
+            boundaryPromptImage = CreateImage("Boundary E Prompt", canvas.transform, Color.white);
+            boundaryPromptImage.sprite = LoadSprite(InteractionPromptPath);
+            boundaryPromptImage.preserveAspect = true;
+            boundaryPromptImage.raycastTarget = false;
+            boundaryPromptImage.rectTransform.anchorMin = new Vector2(0.5f, 0.5f);
+            boundaryPromptImage.rectTransform.anchorMax = new Vector2(0.5f, 0.5f);
+            boundaryPromptImage.rectTransform.pivot = new Vector2(0.5f, 0.5f);
+            boundaryPromptImage.rectTransform.sizeDelta = new Vector2(130f, 60f);
+            boundaryPromptImage.gameObject.SetActive(false);
 
             modal = CreatePanel("Modal", canvas.transform, new Color(0.02f, 0.018f, 0.015f, 0.94f)).gameObject;
             DecoratePanel(modal.GetComponent<Image>(), UiFolder + "对话框.png", new Color(0.07f, 0.035f, 0.02f, 0.96f));
@@ -411,6 +442,7 @@ namespace ChapterGame
             flags.Clear();
             lightView = false;
             currentChapterId = chapterId;
+            EnsureChapter4EndingItem();
             var chapter = chapters[chapterId];
             messageText.text = chapter.StartMessage;
             GoToScene(chapter.StartScene);
@@ -452,11 +484,17 @@ namespace ChapterGame
 
         private void GoToScene(string sceneId)
         {
-            if (inputLocked || string.IsNullOrEmpty(sceneId) || !scenes.ContainsKey(sceneId))
+            GoToScene(sceneId, SpawnDefault);
+        }
+
+        private void GoToScene(string sceneId, int spawnSide)
+        {
+            if (inputLocked || transitionCoroutine != null || string.IsNullOrEmpty(sceneId) || !scenes.ContainsKey(sceneId))
             {
                 return;
             }
 
+            pendingSpawnSide = spawnSide;
             transitionCoroutine = StartCoroutine(TransitionToScene(sceneId));
         }
 
@@ -469,6 +507,7 @@ namespace ChapterGame
             lightView = false;
             selectedLamp = null;
             ApplyBackground(scene);
+            ApplyPendingSpawnSide();
             RebuildProps();
             RebuildVfx();
             RefreshHud();
@@ -481,6 +520,7 @@ namespace ChapterGame
             inputLocked = true;
             sceneReady = false;
             currentHoverHotspot = null;
+            ClearBoundaryNavigationPrompt();
             HideDialogue();
             ClearModalActions();
             if (modal != null)
@@ -568,6 +608,12 @@ namespace ChapterGame
                 return;
             }
 
+            if (currentChapterId == "chapter1" && inventory.Contains("黑灯（未点燃）") && !inventory.Contains("黑灯（已点燃）"))
+            {
+                Say("黑灯还没有点燃。");
+                return;
+            }
+
             lightView = !lightView;
             var scene = scenes[currentSceneId];
             ApplyBackground(scene);
@@ -579,14 +625,7 @@ namespace ChapterGame
 
             if (!string.IsNullOrEmpty(scene.LightMessage))
             {
-                if (lightView && currentChapterId == "chapter1" && inventory.Contains("黑灯（未点燃）") && !inventory.Contains("黑灯（已点燃）"))
-                {
-                    Say("黑灯还未点燃，只能看见一点模糊的灯影。");
-                }
-                else
-                {
-                    Say(lightView ? scene.LightMessage : "灯影退去，眼前又恢复了普通视角。");
-                }
+                Say(lightView ? scene.LightMessage : "灯影退去，眼前又恢复了普通视角。");
             }
         }
 
@@ -695,6 +734,20 @@ namespace ChapterGame
         private float GetPlayerEdgePadding()
         {
             return Mathf.Clamp(140f / Mathf.Max(1f, sceneWidth), 0.02f, 0.08f);
+        }
+
+        private void ApplyPendingSpawnSide()
+        {
+            if (pendingSpawnSide == SpawnLeft)
+            {
+                playerX = GetPlayerEdgePadding();
+            }
+            else if (pendingSpawnSide == SpawnRight)
+            {
+                playerX = 1f - GetPlayerEdgePadding();
+            }
+
+            pendingSpawnSide = SpawnDefault;
         }
 
         private void RebuildHotspots()
@@ -1489,16 +1542,16 @@ namespace ChapterGame
         private void ShowOfferingPuzzle()
         {
             ShowGenericPuzzle("供品顺序",
-                Chapter1Folder + "21_offering_set_full.png",
-                "拖动供品到五个位置。灯影提示：果、糕、酒、香、火。",
+                Chapter1Folder + "摆满贡品的供桌.png",
+                "拖动供品到五个位置。残留痕迹提示：果、糕、酒、香、火。",
                 new[] { "果", "糕", "酒", "香", "火" },
                 new[]
                 {
-                    new PuzzlePiece("苹果", Chapter1Folder + "28_offering_tray.png"),
-                    new PuzzlePiece("糕点", Chapter1Folder + "21_offering_set_full.png"),
-                    new PuzzlePiece("酒杯", Chapter1Folder + "21_offering_set_full.png"),
-                    new PuzzlePiece("香炉", Chapter1Folder + "25_incense_burner_single.png"),
-                    new PuzzlePiece("白蜡烛", Chapter1Folder + "蜡烛.png")
+                    new PuzzlePiece("苹果", Chapter1Folder + "苹果.png"),
+                    new PuzzlePiece("糕点", Chapter1Folder + "糕点.png"),
+                    new PuzzlePiece("酒杯", Chapter1Folder + "酒杯.png"),
+                    new PuzzlePiece("香炉", Chapter1Folder + "香炉.png"),
+                    new PuzzlePiece("白蜡烛", Chapter1Folder + "白蜡烛.png")
                 },
                 new[] { "苹果", "糕点", "酒杯", "香炉", "白蜡烛" },
                 CompleteOfferingPuzzle);
@@ -1542,7 +1595,7 @@ namespace ChapterGame
             inventory.Add("黑灯（已点燃）");
             inventory.Remove("黑灯（未点燃）");
             flags.Add("c1_lantern_lit");
-            Inspect("黑灯（已点燃）", "白蜡烛点燃，黑灯随之亮起。纸灰飘落，外婆残影出现在火光后。\n外婆残影：灯点起来，才能看见被藏住的名字。\n林照萤：外婆……？\n外婆残影：去井边。", Chapter1Folder + "18_black_lantern_lit.png");
+            Inspect("黑灯（已点燃）", "黑灯点燃。\n外婆：灯点起来，才能看见被藏住的名字。\n林照萤：外婆……？\n外婆的声音：先回桥边，再去井边。\n黑灯已点燃，按 Q 切换灯影视角。", Chapter1Folder + "黑灯.png");
             SetObjective("返回石桥，查看写名河灯");
             RefreshHud();
             RebuildProps();
@@ -1749,6 +1802,7 @@ namespace ChapterGame
 
         private void ShowFinalChoice()
         {
+            EnsureChapter4EndingItem();
             titleText.text = "第四章 无声灯楼 / 最终选择";
             SetObjective("做出最终选择");
             Say("黑灯台前只剩三个选择。");
@@ -1757,6 +1811,17 @@ namespace ChapterGame
             CreateHotspot(new HotspotDefinition("隐瞒真相", new Rect(0.16f, 0.42f, 0.36f, 0.58f), delegate { ShowEnding("沉灯"); }));
             CreateHotspot(new HotspotDefinition("公开真相", new Rect(0.40f, 0.42f, 0.60f, 0.58f), delegate { ShowEnding("归灯"); }));
             CreateHotspot(new HotspotDefinition("留在灯楼", new Rect(0.64f, 0.42f, 0.84f, 0.58f), delegate { ShowEnding("守灯"); }));
+        }
+
+        private void EnsureChapter4EndingItem()
+        {
+            if (currentChapterId != "chapter4" || inventory.Contains("守灵灯钥"))
+            {
+                return;
+            }
+
+            inventory.Add("守灵灯钥");
+            RefreshHud();
         }
 
         private void ShowEnding(string ending)
@@ -1846,7 +1911,18 @@ namespace ChapterGame
             if (Mathf.Abs(axis) > 0.01f)
             {
                 var playerWorldX = sceneWidth * playerX;
-                playerWorldX += axis * 430f * deltaTime;
+                var nextPlayerWorldX = playerWorldX + axis * 430f * deltaTime;
+                if (TryHandleChapter1BoundaryTransition(axis, nextPlayerWorldX))
+                {
+                    return;
+                }
+
+                if (TryHandleChapter4BoundaryTransition(axis, nextPlayerWorldX))
+                {
+                    return;
+                }
+
+                playerWorldX = nextPlayerWorldX;
                 var padding = sceneWidth * GetPlayerEdgePadding();
                 playerWorldX = Mathf.Clamp(playerWorldX, padding, Mathf.Max(padding, sceneWidth - padding));
                 playerX = Mathf.Clamp01(playerWorldX / Mathf.Max(1f, sceneWidth));
@@ -1860,6 +1936,613 @@ namespace ChapterGame
             }
 
             TickPlayerAnimation(deltaTime);
+        }
+
+        private bool TryHandleChapter1BoundaryTransition(float axis, float nextPlayerWorldX)
+        {
+            if (currentChapterId != "chapter1" || string.IsNullOrEmpty(currentSceneId))
+            {
+                return false;
+            }
+
+            var padding = sceneWidth * GetPlayerEdgePadding();
+            if (axis > 0f && nextPlayerWorldX < sceneWidth - padding)
+            {
+                return false;
+            }
+
+            if (axis < 0f && nextPlayerWorldX > padding)
+            {
+                return false;
+            }
+
+            var spawnSide = axis > 0f ? SpawnLeft : SpawnRight;
+            var targetSceneId = GetChapter1BoundaryTarget(axis);
+            if (targetSceneId == BoundaryBlocked)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(targetSceneId))
+            {
+                return false;
+            }
+
+            playerFacingRight = axis > 0f;
+            SetPlayerAnimation("walk", false);
+            GoToScene(targetSceneId, spawnSide);
+            return true;
+        }
+
+        private string GetChapter1BoundaryTarget(float axis)
+        {
+            if (axis > 0f)
+            {
+                switch (currentSceneId)
+                {
+                    case "c1_town_gate":
+                        if (!flags.Contains("c1_town_checked"))
+                        {
+                            SayBoundaryBlocked("先调查镇口标识物。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c1_bridge";
+                    case "c1_bridge":
+                        if (flags.Contains("c1_lantern_lit") && !flags.Contains("c1_seen_named_lantern"))
+                        {
+                            SayBoundaryBlocked("先按 Q 进入灯影视角，再调查河灯。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c1_grandma_home";
+                    case "c1_grandma_home":
+                        if (!inventory.Contains("黑灯（未点燃）"))
+                        {
+                            SayBoundaryBlocked("先找到外婆留下的黑灯。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c1_mourning_hall";
+                    case "c1_mourning_hall":
+                        if (!flags.Contains("c1_lantern_lit"))
+                        {
+                            SayBoundaryBlocked("黑灯还没有点燃。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c1_well";
+                }
+            }
+
+            if (axis < 0f)
+            {
+                switch (currentSceneId)
+                {
+                    case "c1_bridge":
+                        return "c1_town_gate";
+                    case "c1_grandma_home":
+                        return "c1_bridge";
+                    case "c1_mourning_hall":
+                        return "c1_grandma_home";
+                    case "c1_well":
+                        return "c1_mourning_hall";
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryHandleChapter4BoundaryTransition(float axis, float nextPlayerWorldX)
+        {
+            if (currentChapterId != "chapter4" || string.IsNullOrEmpty(currentSceneId))
+            {
+                return false;
+            }
+
+            var padding = sceneWidth * GetPlayerEdgePadding();
+            if (axis > 0f && nextPlayerWorldX < sceneWidth - padding)
+            {
+                return false;
+            }
+
+            if (axis < 0f && nextPlayerWorldX > padding)
+            {
+                return false;
+            }
+
+            var spawnSide = axis > 0f ? SpawnLeft : SpawnRight;
+            var targetSceneId = GetChapter4BoundaryTarget(axis);
+            if (targetSceneId == BoundaryBlocked)
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(targetSceneId))
+            {
+                return false;
+            }
+
+            playerFacingRight = axis > 0f;
+            SetPlayerAnimation("walk", false);
+            GoToScene(targetSceneId, spawnSide);
+            return true;
+        }
+
+        private string GetChapter4BoundaryTarget(float axis)
+        {
+            if (axis > 0f)
+            {
+                switch (currentSceneId)
+                {
+                    case "c4_tower_gate":
+                        if (!flags.Contains("c4_gate_open"))
+                        {
+                            SayBoundaryBlocked("灯楼大门还没有打开。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c4_genealogy";
+                    case "c4_genealogy":
+                        if (!flags.Contains("c4_truth_genealogy"))
+                        {
+                            SayBoundaryBlocked("先查看打开的族谱。");
+                            return BoundaryBlocked;
+                        }
+
+                        return "c4_black_lamp_stage";
+                }
+            }
+
+            if (axis < 0f)
+            {
+                switch (currentSceneId)
+                {
+                    case "c4_genealogy":
+                        return "c4_tower_gate";
+                    case "c4_black_lamp_stage":
+                        return "c4_genealogy";
+                }
+            }
+
+            return null;
+        }
+
+        private bool TryActivateBoundaryNavigation()
+        {
+            if (TryActivateChapter3BoatDarkroomNavigation())
+            {
+                return true;
+            }
+
+            if (TryActivateChapter3BridgeBoatNavigation())
+            {
+                return true;
+            }
+
+            if (TryActivateChapter3TunnelBridgeNavigation())
+            {
+                return true;
+            }
+
+            if (TryActivateChapter3BackstageNavigation())
+            {
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(boundaryNavigationTargetSceneId) && string.IsNullOrEmpty(boundaryNavigationBlockedMessage))
+            {
+                return false;
+            }
+
+            if (!string.IsNullOrEmpty(boundaryNavigationBlockedMessage))
+            {
+                SayBoundaryBlocked(boundaryNavigationBlockedMessage);
+                return true;
+            }
+
+            GoToScene(boundaryNavigationTargetSceneId, boundaryNavigationSpawnSide);
+            ClearBoundaryNavigationPrompt();
+            return true;
+        }
+
+        private bool TryActivateChapter3BoatDarkroomNavigation()
+        {
+            if (currentChapterId != "chapter3" || currentSceneId != "c3_boat")
+            {
+                return false;
+            }
+
+            if (!IsPlayerInNavigationZone(new Rect(0.68f, 0.18f, 0.98f, 0.58f)))
+            {
+                return false;
+            }
+
+            if (!HasChapter3FullTag())
+            {
+                SayBoundaryBlocked("没有陈望月名牌，暗门不会打开。");
+                return true;
+            }
+
+            GoToScene("c3_darkroom", SpawnLeft);
+            ClearBoundaryNavigationPrompt();
+            return true;
+        }
+
+        private bool TryActivateChapter3BridgeBoatNavigation()
+        {
+            if (currentChapterId != "chapter3" || currentSceneId != "c3_bridge")
+            {
+                return false;
+            }
+
+            if (!IsPlayerInNavigationZone(new Rect(0.70f, 0.16f, 0.98f, 0.58f)))
+            {
+                return false;
+            }
+
+            if (!HasChapter3BoatClue())
+            {
+                SayBoundaryBlocked("先在断桥边找到名单碎片。");
+                return true;
+            }
+
+            GoToScene("c3_boat", SpawnLeft);
+            ClearBoundaryNavigationPrompt();
+            return true;
+        }
+
+        private bool TryActivateChapter3TunnelBridgeNavigation()
+        {
+            if (currentChapterId != "chapter3" || currentSceneId != "c3_tunnel")
+            {
+                return false;
+            }
+
+            if (!IsPlayerInNavigationZone(new Rect(0.58f, 0.20f, 0.98f, 0.60f)))
+            {
+                return false;
+            }
+
+            if (!HasChapter3NamePaper())
+            {
+                SayBoundaryBlocked("你还没有拿到封名残纸。");
+                return true;
+            }
+
+            GoToScene("c3_bridge", SpawnLeft);
+            ClearBoundaryNavigationPrompt();
+            return true;
+        }
+
+        private bool TryActivateChapter3BackstageNavigation()
+        {
+            if (currentChapterId != "chapter3" || currentSceneId != "c3_stage")
+            {
+                return false;
+            }
+
+            if (!IsPlayerInNavigationZone(new Rect(0.76f, 0.20f, 0.98f, 0.58f)))
+            {
+                return false;
+            }
+
+            if (!IsChapter3StageReadyForBackstage())
+            {
+                SayBoundaryBlocked("先调查舞台上的线索。");
+                return true;
+            }
+
+            GoToScene("c3_backstage", SpawnLeft);
+            ClearBoundaryNavigationPrompt();
+            return true;
+        }
+
+        private void UpdateBoundaryNavigationPrompt()
+        {
+            ClearBoundaryNavigationState();
+
+            if (boundaryPromptImage == null || inputLocked || (currentChapterId != "chapter2" && currentChapterId != "chapter3") || string.IsNullOrEmpty(currentSceneId) || playerImage == null || characterRoot == null || !characterRoot.gameObject.activeSelf || modal.activeSelf || dialoguePanel.activeSelf || (maskPuzzlePanel != null && maskPuzzlePanel.activeSelf) || (genericPuzzlePanel != null && genericPuzzlePanel.activeSelf))
+            {
+                SetBoundaryPromptVisible(false);
+                return;
+            }
+
+            if (TrySetupChapter3Navigation())
+            {
+                return;
+            }
+
+            if (TrySetupChapter2DoorNavigation())
+            {
+                return;
+            }
+
+            if (currentChapterId != "chapter2")
+            {
+                SetBoundaryPromptVisible(false);
+                return;
+            }
+
+            var padding = GetPlayerEdgePadding();
+            var leftEdge = playerX <= padding + 0.012f;
+            var rightEdge = playerX >= 1f - padding - 0.012f;
+            if (!leftEdge && !rightEdge)
+            {
+                SetBoundaryPromptVisible(false);
+                return;
+            }
+
+            var side = rightEdge ? SpawnRight : SpawnLeft;
+            var target = GetChapter2BoundaryTarget(side, out var blockedMessage);
+            if (string.IsNullOrEmpty(target) && string.IsNullOrEmpty(blockedMessage))
+            {
+                SetBoundaryPromptVisible(false);
+                return;
+            }
+
+            boundaryNavigationTargetSceneId = target;
+            boundaryNavigationBlockedMessage = blockedMessage;
+            boundaryNavigationSide = side;
+            boundaryNavigationSpawnSide = side == SpawnRight ? SpawnLeft : SpawnRight;
+            PositionBoundaryPrompt();
+            SetBoundaryPromptVisible(true);
+        }
+
+        private bool TrySetupChapter2DoorNavigation()
+        {
+            if (currentSceneId != "c2_door")
+            {
+                return false;
+            }
+
+            if (playerX < Chapter2DoorLanternMinX || playerX > Chapter2DoorLanternMaxX)
+            {
+                return false;
+            }
+
+            if (!flags.Contains("c2_door_sign_checked") || !flags.Contains("c2_door_lantern_checked"))
+            {
+                boundaryNavigationBlockedMessage = "先调查纸马铺招牌和红灯笼。";
+            }
+            else
+            {
+                boundaryNavigationTargetSceneId = "c2_front";
+            }
+
+            boundaryNavigationSide = SpawnRight;
+            boundaryNavigationSpawnSide = SpawnLeft;
+            PositionBoundaryPrompt();
+            SetBoundaryPromptVisible(true);
+            return true;
+        }
+
+        private bool TrySetupChapter3Navigation()
+        {
+            if (currentChapterId != "chapter3")
+            {
+                return false;
+            }
+
+            switch (currentSceneId)
+            {
+                case "c3_stage":
+                    if (TrySetupChapterNavigationZone(new Rect(0.42f, 0.12f, 0.62f, 0.34f), flags.Contains("c3_tunnel_entrance_open") ? "c3_tunnel" : null, null, SpawnLeft))
+                    {
+                        return true;
+                    }
+                    return TrySetupChapterNavigationZone(new Rect(0.76f, 0.20f, 0.98f, 0.58f), IsChapter3StageReadyForBackstage() ? "c3_backstage" : null, "先调查舞台上的线索。", SpawnLeft);
+                case "c3_backstage":
+                    return TrySetupChapterNavigationZone(new Rect(0.02f, 0.22f, 0.18f, 0.52f), "c3_stage", null, SpawnRight);
+                case "c3_tunnel":
+                    if (TrySetupChapterNavigationZone(new Rect(0.02f, 0.20f, 0.18f, 0.52f), "c3_stage", null, SpawnRight))
+                    {
+                        return true;
+                    }
+                    return TrySetupChapterNavigationZone(new Rect(0.58f, 0.20f, 0.98f, 0.60f), HasChapter3NamePaper() ? "c3_bridge" : null, "你还没有拿到封名残纸。", SpawnLeft);
+                case "c3_bridge":
+                    if (TrySetupChapterNavigationZone(new Rect(0.02f, 0.20f, 0.18f, 0.52f), "c3_tunnel", null, SpawnRight))
+                    {
+                        return true;
+                    }
+                    return TrySetupChapterNavigationZone(new Rect(0.70f, 0.16f, 0.98f, 0.58f), HasChapter3BoatClue() ? "c3_boat" : null, "先在断桥边找到名单碎片。", SpawnLeft);
+                case "c3_boat":
+                    if (TrySetupChapterNavigationZone(new Rect(0.02f, 0.20f, 0.18f, 0.52f), "c3_bridge", null, SpawnRight))
+                    {
+                        return true;
+                    }
+                    return TrySetupChapterNavigationZone(new Rect(0.68f, 0.18f, 0.98f, 0.58f), HasChapter3FullTag() ? "c3_darkroom" : null, "没有陈望月名牌，暗门不会打开。", SpawnLeft);
+                case "c3_darkroom":
+                    return TrySetupChapterNavigationZone(new Rect(0.02f, 0.20f, 0.18f, 0.52f), "c3_boat", null, SpawnRight);
+            }
+
+            return false;
+        }
+
+        private bool TrySetupChapterNavigationZone(Rect area, string targetSceneId, string blockedMessage, int spawnSide)
+        {
+            if (!IsPlayerInNavigationZone(area))
+            {
+                return false;
+            }
+
+            if (string.IsNullOrEmpty(targetSceneId) && string.IsNullOrEmpty(blockedMessage))
+            {
+                return false;
+            }
+
+            boundaryNavigationTargetSceneId = targetSceneId;
+            boundaryNavigationBlockedMessage = blockedMessage;
+            boundaryNavigationSpawnSide = spawnSide;
+            boundaryNavigationSide = spawnSide == SpawnLeft ? SpawnRight : SpawnLeft;
+            PositionBoundaryPrompt();
+            SetBoundaryPromptVisible(true);
+            return true;
+        }
+
+        private bool IsChapter3StageReadyForBackstage()
+        {
+            return flags.Contains("c3_stage_checked")
+                || flags.Contains("c3_stage_talk")
+                || flags.Contains("c3_stage_words")
+                || flags.Contains("c3_script");
+        }
+
+        private bool HasItemOrFlag(string item, string flag)
+        {
+            return inventory.Contains(item) || flags.Contains(flag);
+        }
+
+        private bool HasChapter3NamePaper()
+        {
+            if (flags.Contains("c3_name_paper") || inventory.Contains("封名残纸"))
+            {
+                return true;
+            }
+
+            foreach (var item in inventory)
+            {
+                if (item.Contains("残纸") || item.Contains("封名"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasChapter3BoatClue()
+        {
+            if (flags.Contains("c3_ghost_seen") || flags.Contains("c3_list_piece") || inventory.Contains("名单碎片"))
+            {
+                return true;
+            }
+
+            foreach (var item in inventory)
+            {
+                if (item.Contains("名单") || item.Contains("碎片"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool HasChapter3FullTag()
+        {
+            if (flags.Contains("c3_full_tag") || inventory.Contains("陈望月名牌"))
+            {
+                return true;
+            }
+
+            foreach (var item in inventory)
+            {
+                if (item.Contains("陈望月") || item.Contains("名牌"))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+
+        private bool IsPlayerInNavigationZone(Rect area)
+        {
+            return playerX >= area.x && playerX <= area.width;
+        }
+
+        private void ClearBoundaryNavigationState()
+        {
+            boundaryNavigationTargetSceneId = null;
+            boundaryNavigationBlockedMessage = null;
+            boundaryNavigationSpawnSide = SpawnDefault;
+            boundaryNavigationSide = SpawnDefault;
+        }
+
+        private void ClearBoundaryNavigationPrompt()
+        {
+            ClearBoundaryNavigationState();
+            SetBoundaryPromptVisible(false);
+        }
+
+        private void SetBoundaryPromptVisible(bool visible)
+        {
+            if (boundaryPromptImage != null && boundaryPromptImage.gameObject.activeSelf != visible)
+            {
+                boundaryPromptImage.gameObject.SetActive(visible);
+            }
+        }
+
+        private void PositionBoundaryPrompt()
+        {
+            if (boundaryPromptImage == null)
+            {
+                return;
+            }
+
+            var playerScreenX = sceneWidth * playerX - cameraX;
+            var x = Mathf.Clamp(playerScreenX - viewportWidth * 0.5f, -viewportWidth * 0.42f, viewportWidth * 0.42f);
+            var y = Mathf.Clamp(320f - viewportHeight * 0.5f, -viewportHeight * 0.40f, viewportHeight * 0.18f);
+            boundaryPromptImage.rectTransform.anchoredPosition = new Vector2(x, y);
+        }
+
+        private string GetChapter2BoundaryTarget(int side, out string blockedMessage)
+        {
+            blockedMessage = null;
+
+            if (side == SpawnRight)
+            {
+                switch (currentSceneId)
+                {
+                    case "c2_front":
+                        return "c2_paper_people";
+                    case "c2_paper_people":
+                        if (!inventory.Contains("后院小钥匙"))
+                        {
+                            blockedMessage = "门已上锁，需要找到钥匙。";
+                            return null;
+                        }
+
+                        return "c2_cutting_table";
+                    case "c2_cutting_table":
+                        if (!flags.Contains("c2_projection_seen"))
+                        {
+                            blockedMessage = "还没有得到焚纸炉的提示。";
+                            return null;
+                        }
+
+                        return "c2_furnace";
+                }
+            }
+
+            if (side == SpawnLeft)
+            {
+                switch (currentSceneId)
+                {
+                    case "c2_front":
+                        return "c2_door";
+                    case "c2_paper_people":
+                        return "c2_front";
+                    case "c2_cutting_table":
+                        return "c2_paper_people";
+                    case "c2_furnace":
+                        return "c2_cutting_table";
+                }
+            }
+
+            return null;
+        }
+
+        private void SayBoundaryBlocked(string message)
+        {
+            if (Time.unscaledTime < nextBoundaryBlockMessageTime)
+            {
+                return;
+            }
+
+            nextBoundaryBlockMessageTime = Time.unscaledTime + 0.85f;
+            Say(message);
         }
 
         private void SetPlayerAnimation(string state, bool restart)
@@ -1951,158 +2634,95 @@ namespace ChapterGame
 
         private void BuildChapter1()
         {
-            chapters["chapter1"] = new ChapterDefinition("第一章 归镇", "c1_town_gate", "当前目标：回到渡灯镇，找到外婆留下的黑灯。");
+            chapters["chapter1"] = new ChapterDefinition("第一章 归镇", "c1_town_gate", "当前目标：回到渡灯镇，完成移动与互动教学。");
 
-            AddScene(new SceneDefinition("c1_town_gate", "chapter1", "镇口", Chapter1Folder, "镇口", "镇口灯影", "A/D 移动，E 互动；调查镇口后向右前往石桥")
-                .AddEffect("薄雾", Chapter1Folder + "38_thin_mist", new Rect(0.00f, 0.08f, 1.00f, 0.72f), 6, 0.35f)
-                .AddEffect("浮尘", Chapter1Folder + "39_floating_dust", new Rect(0.00f, 0.20f, 1.00f, 0.92f), 6, 0.20f)
-                .Add("镇口石碑", new Rect(0.06f, 0.16f, 0.16f, 0.44f), delegate
+            AddScene(new SceneDefinition("c1_town_gate", "chapter1", "镇口", Chapter1Folder, "镇口区域", "镇口区域灯影下的场景", "A/D 移动，E 互动；调查镇口标识物后向右前往石桥")
+                .WithLightMessage("镇口在灯影下发白，门楼深处像藏着一层旧灰。")
+                .Add("镇口标识物", new Rect(0.26f, 0.44f, 0.58f, 0.76f), delegate
                 {
-                    Say("石碑上刻着“渡灯镇”，字缝里积着纸灰。");
+                    SetFlag("c1_town_checked", "林照萤：渡灯镇……我已经很多年没回来了。\n林照萤：这里和记忆里一样，却又像少了什么。\n当前目标：前往石桥。");
                 })
-                .Add("左侧灯笼", new Rect(0.13f, 0.50f, 0.22f, 0.70f), delegate
+                .Add("镇口地面", new Rect(0.28f, 0.10f, 0.58f, 0.28f), delegate
                 {
-                    Say("灯笼还温着，像有人刚刚从这里经过。");
-                })
-                .Add("右侧灯笼", new Rect(0.48f, 0.46f, 0.58f, 0.68f), delegate
-                {
-                    Say("右侧灯笼轻轻晃动，灯面上的字被雾遮住了一半。");
-                })
-                .Add("牌坊招牌", new Rect(0.26f, 0.66f, 0.50f, 0.86f), delegate
-                {
-                    Say("林照萤：渡灯镇……我已经很多年没回来了。这里和记忆里一样，却又像少了什么。");
-                    flags.Add("c1_town_checked");
-                })
-                .Add("地面纸灰", new Rect(0.42f, 0.12f, 0.56f, 0.26f), delegate { Say("纸灰被风吹过门楼，像刚烧完没多久。"); })
-                .Add("神龛门", new Rect(0.78f, 0.25f, 0.94f, 0.52f), delegate
-                {
-                    Say("神龛门半掩着，门缝里透出一线冷光。");
-                })
-                .Add("去石桥", new Rect(0.79f, 0.13f, 0.96f, 0.38f), delegate
-                {
-                    if (!NeedFlag("c1_town_checked", "先调查镇口，熟悉互动。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c1_bridge");
+                    Say("纸灰被风吹过门楼，像刚烧完没多久。");
                 }));
 
-            AddScene(new SceneDefinition("c1_bridge", "chapter1", "石桥", Chapter1Folder, "石桥", "石桥灯影", "调查河灯；之后前往外婆家")
-                .WithLightMessage("河灯上的字在灯影下浮出。水面映出不属于这里的倒影。")
-                .AddEffect("河水倒影", Chapter1Folder + "VFX/Water/42_river_reflection", new Rect(0.06f, 0.06f, 0.96f, 0.38f), 8, 0.46f)
-                .AddEffect("水波", Chapter1Folder + "VFX/Water/43_water_ripples", new Rect(0.10f, 0.08f, 0.88f, 0.44f), 8, 0.38f)
-                .AddEffect("薄雾", Chapter1Folder + "38_thin_mist", new Rect(0.00f, 0.12f, 1.00f, 0.76f), 6, 0.30f)
-                .AddEffect("灯影滤镜", Chapter1Folder + "VFX/LanternVision/31_lantern_vision_filter.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.35f, true)
-                .AddEffect("灯影视角暗角", Chapter1Folder + "VFX/LanternVision/45_vignette_overlay.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.32f, true)
-                .AddEffect("水面异化倒影", Chapter1Folder + "VFX/LanternVision/34_water_reflection_effect.png", new Rect(0.06f, 0.04f, 0.96f, 0.46f), 1, 0.55f, true, "c1_lantern_lit")
-                .AddProp("普通河灯", Chapter1Folder + "19_river_lantern_normal.png", new Rect(0.39f, 0.19f, 0.54f, 0.37f), 1f, false, null, "c1_seen_named_lantern")
-                .AddProp("写名河灯", Chapter1Folder + "20_river_lantern_named.png", new Rect(0.38f, 0.18f, 0.56f, 0.40f), 1f, true, "c1_seen_named_lantern")
-                .AddProp("桥女孩", Chapter1Folder + "桥女孩.png", new Rect(0.55f, 0.20f, 0.72f, 0.58f), 0.78f, true, "c1_seen_named_lantern")
-                .Add("普通河灯", new Rect(0.38f, 0.20f, 0.56f, 0.42f), delegate
+            AddScene(new SceneDefinition("c1_bridge", "chapter1", "石桥", Chapter1Folder, "石桥区域", "石桥区域灯影下场景", "调查桥边河灯；之后继续向右寻找外婆留下的黑灯")
+                .WithLightMessage("河灯上的字在灯影下浮出，水面像在把名字往下拖。")
+                .AddProp("普通河灯", Chapter1Folder + "普通河灯.png", new Rect(0.42f, 0.18f, 0.54f, 0.32f), 1f, false, null, "c1_seen_named_lantern")
+                .AddProp("写有名字的河灯", Chapter1Folder + "写有名字的河灯.png", new Rect(0.38f, 0.15f, 0.58f, 0.38f), 1f, true, "c1_seen_named_lantern")
+                .Add("河灯", new Rect(0.38f, 0.16f, 0.58f, 0.40f), delegate
                 {
-                    if (lightView && inventory.Contains("黑灯（已点燃）"))
+                    if (!flags.Contains("c1_lantern_lit"))
                     {
-                        Take("写名河灯线索", "c1_seen_named_lantern", "林照萤：这上面……写的是我的名字。为什么我的名字会在河灯上？");
-                        Inspect("写着名字的河灯", "灯影下，河灯上的字浮起来：林照萤。水面像在把这个名字往下拖。", Chapter1Folder + "20_river_lantern_named.png");
-                        SetObjective("前往老井");
+                        Inspect("普通河灯", "林照萤：河灯还亮着，像是刚被人放下。", Chapter1Folder + "普通河灯.png");
                         return;
                     }
 
-                    Inspect("河灯", "河灯还亮着，像是刚被人放下。现在还不能看到真正线索。", Chapter1Folder + "19_river_lantern_normal.png");
-                })
-                .Add("去外婆家", new Rect(0.80f, 0.22f, 0.98f, 0.52f), delegate
-                {
-                    if (flags.Contains("c1_lantern_lit") && !flags.Contains("c1_seen_named_lantern"))
-                    {
-                        Say("先用灯影视角看看河灯。");
-                        return;
-                    }
-                    GoToScene(flags.Contains("c1_seen_named_lantern") ? "c1_well" : "c1_grandma_home");
-                })
-                .Add("回镇口", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c1_town_gate"); }));
-
-            AddScene(new SceneDefinition("c1_grandma_home", "chapter1", "外婆家", Chapter1Folder, "外婆家", "外婆家灯影", "寻找外婆留下的东西")
-                .WithLightMessage("墙上浮现模糊文字：灯未明，名未归。外婆的残影若隐若现。")
-                .AddEffect("浮尘", Chapter1Folder + "39_floating_dust", new Rect(0.00f, 0.18f, 1.00f, 0.92f), 6, 0.22f)
-                .AddEffect("灯影滤镜", Chapter1Folder + "VFX/LanternVision/31_lantern_vision_filter.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.32f, true)
-                .AddEffect("灯影光晕", Chapter1Folder + "VFX/LanternVision/37_black_lantern_glow.png", new Rect(0.42f, 0.18f, 0.82f, 0.62f), 1, 0.55f, true)
-                .AddEffect("脚印引导", Chapter1Folder + "VFX/LanternVision/33_footprints_guide_sheet_14.png", new Rect(0.18f, 0.08f, 0.82f, 0.36f), 1, 0.62f, true)
-                .AddEffect("灯影残字", Chapter1Folder + "VFX/LanternVision/32_hidden_text_sheet_01.png", new Rect(0.24f, 0.34f, 0.72f, 0.66f), 1, 0.55f, true)
-                .AddProp("外婆残影", Chapter1Folder + "外婆.png", new Rect(0.20f, 0.18f, 0.38f, 0.62f), 0.68f, true)
-                .AddProp("黑灯未点燃", Chapter1Folder + "17_black_lantern_unlit.png", new Rect(0.61f, 0.25f, 0.80f, 0.60f), 1f, false, null, "c1_has_lantern")
-                .Add("旧藤椅", new Rect(0.18f, 0.30f, 0.36f, 0.58f), delegate { Say("林照萤：藤椅还在，只是没人再坐了。"); })
-                .Add("香炉", new Rect(0.42f, 0.24f, 0.56f, 0.42f), delegate { Say("林照萤：香灰还没散……有人来过？"); })
-                .Add("黑灯", new Rect(0.62f, 0.28f, 0.78f, 0.58f), delegate
-                {
-                    Take("黑灯（未点燃）", "c1_has_lantern", "林照萤：这盏黑灯……外婆以前从不让我碰。获得黑灯（未点燃）。按 Q 切换灯影视角。");
-                    Inspect("黑灯（未点燃）", "灯芯冰冷，灯罩内侧有被烟熏出的黑色纹路。", Chapter1Folder + "17_black_lantern_unlit.png");
-                    SetObjective("前往灵堂，点燃黑灯");
-                }, null, "c1_has_lantern")
-                .Add("去灵堂", new Rect(0.80f, 0.20f, 0.98f, 0.52f), delegate
-                {
-                    if (!NeedItem("黑灯（未点燃）", "先找到外婆留下的黑灯。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c1_mourning_hall");
-                })
-                .Add("回石桥", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c1_bridge"); }));
-
-            AddScene(new SceneDefinition("c1_mourning_hall", "chapter1", "灵堂", Chapter1Folder, "哀悼厅", "哀悼厅灯影", "按灯影提示摆放供品，点燃黑灯")
-                .WithLightMessage("隐藏文字浮现：果、糕、酒、香、火。供桌像在等完整的规矩。")
-                .AddEffect("香烟", Chapter1Folder + "41_incense_smoke", new Rect(0.36f, 0.25f, 0.64f, 0.72f), 6, 0.40f)
-                .AddEffect("烛火", Chapter1Folder + "36_candle_flame", new Rect(0.55f, 0.30f, 0.68f, 0.58f), 10, 0.80f, false, "c1_lantern_lit")
-                .AddEffect("纸灰飘落", Chapter1Folder + "40_falling_paper_ash", new Rect(0.00f, 0.20f, 1.00f, 1.00f), 7, 0.45f, false, "c1_lantern_lit")
-                .AddEffect("灯影滤镜", Chapter1Folder + "VFX/LanternVision/31_lantern_vision_filter.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.30f, true)
-                .AddEffect("黑灯光晕", Chapter1Folder + "VFX/LanternVision/37_black_lantern_glow 1.png", new Rect(0.32f, 0.18f, 0.74f, 0.62f), 1, 0.58f, true)
-                .AddEffect("隐藏文字", Chapter1Folder + "VFX/LanternVision/32_hidden_text_sheet_08.png", new Rect(0.22f, 0.38f, 0.76f, 0.72f), 1, 0.58f, true)
-                .AddProp("供品托盘", Chapter1Folder + "28_offering_tray.png", new Rect(0.08f, 0.22f, 0.28f, 0.50f), 1f)
-                .AddProp("供品组合", Chapter1Folder + "21_offering_set_full.png", new Rect(0.30f, 0.18f, 0.70f, 0.55f), 1f)
-                .AddProp("香炉", Chapter1Folder + "25_incense_burner_single.png", new Rect(0.45f, 0.23f, 0.58f, 0.48f), 1f)
-                .AddProp("纸人", Chapter1Folder + "纸人.png", new Rect(0.75f, 0.18f, 0.93f, 0.64f), 1f, false, null, "c1_lantern_lit")
-                .AddProp("纸人灯影", Chapter1Folder + "纸人灯影.png", new Rect(0.73f, 0.16f, 0.95f, 0.68f), 1f, true)
-                .AddProp("点燃的蜡烛", Chapter1Folder + "点燃的蜡烛.png", new Rect(0.55f, 0.28f, 0.68f, 0.56f), 1f, false, "c1_lantern_lit")
-                .AddProp("黑灯已点燃", Chapter1Folder + "18_black_lantern_lit.png", new Rect(0.58f, 0.23f, 0.75f, 0.56f), 1f, false, "c1_lantern_lit")
-                .Add("供桌", new Rect(0.30f, 0.22f, 0.72f, 0.52f), delegate { Say("林照萤：供桌上的位置是空的，像是在等什么。"); })
-                .Add("纸人", new Rect(0.76f, 0.22f, 0.92f, 0.62f), delegate
-                {
-                    Inspect("纸人", lightView ? "灯影下，纸人的脸像被重新描过，眼睛直直盯着供桌。" : "林照萤：纸人的脸……好像被人重新画过。", lightView ? Chapter1Folder + "纸人灯影.png" : Chapter1Folder + "纸人.png");
-                })
-                .Add("摆放供品", new Rect(0.22f, 0.54f, 0.54f, 0.78f), delegate
-                {
                     if (!lightView)
                     {
-                        Say("也许要用黑灯照一照，才能知道供品顺序。");
+                        Say("也许要用黑灯照一照河灯。");
                         return;
                     }
 
-                    ShowOfferingPuzzle();
-                }, null, "c1_offering_solved")
-                .Add("查看供品", new Rect(0.08f, 0.24f, 0.26f, 0.48f), delegate
+                    Take("写名河灯线索", "c1_seen_named_lantern", "林照萤：这上面……写的是我的名字。\n林照萤：为什么我的名字会在河灯上？");
+                    Inspect("写有名字的河灯", "灯影下，河灯上浮出“林照萤”三个字。水面像在把这个名字拖进更深处。", Chapter1Folder + "写有名字的河灯.png");
+                    SetObjective("去老井查清名字的来源");
+                }, null, "c1_seen_named_lantern"));
+
+            AddScene(new SceneDefinition("c1_grandma_home", "chapter1", "外婆家", Chapter1Folder, "外婆家", "外婆家灯影", "寻找外婆留下的东西，获得黑灯")
+                .WithLightMessage("外婆家在灯影下泛出冷光，旧物的影子像还停在原处。")
+                .AddProp("旧藤椅", Chapter1Folder + "旧藤椅.png", new Rect(0.16f, 0.20f, 0.34f, 0.46f), 1f)
+                .AddProp("香炉", Chapter1Folder + "香炉.png", new Rect(0.42f, 0.20f, 0.52f, 0.36f), 1f)
+                .AddProp("外婆", Chapter1Folder + "外婆.png", new Rect(0.18f, 0.18f, 0.36f, 0.70f), 0.72f, false, "c1_has_lantern")
+                .AddProp("黑灯", Chapter1Folder + "黑灯.png", new Rect(0.62f, 0.24f, 0.78f, 0.56f), 1f, false, null, "c1_has_lantern")
+                .Add("旧藤椅", new Rect(0.16f, 0.24f, 0.34f, 0.50f), delegate
                 {
-                    Inspect("供品", "苹果、糕点、酒杯、香炉、白蜡烛。灯影提示的顺序是：果、糕、酒、香、火。", Chapter1Folder + "21_offering_set_full.png");
+                    Say("林照萤：藤椅还在，只是没人再坐了。");
                 })
-                .Add("回石桥", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate
+                .Add("香炉", new Rect(0.40f, 0.22f, 0.54f, 0.38f), delegate
                 {
-                    if (!NeedFlag("c1_lantern_lit", "黑灯还没有点燃。"))
+                    Say("林照萤：香灰还没散……有人来过？");
+                })
+                .Add("黑灯", new Rect(0.60f, 0.22f, 0.80f, 0.58f), delegate
+                {
+                    Take("黑灯（未点燃）", "c1_has_lantern", "林照萤：这盏黑灯……外婆以前从不让我碰。\n获得道具：黑灯（未点燃）。\n当前目标：去灵堂找到点燃黑灯的方法。");
+                    Inspect("黑灯（未点燃）", "灯芯冰冷，灯罩内侧有被烟熏出的黑色纹路。黑灯未点燃前，无法进入灯影视角。", Chapter1Folder + "黑灯.png");
+                    SetObjective("去灵堂找到点燃黑灯的方法");
+                }, null, "c1_has_lantern"));
+
+            AddScene(new SceneDefinition("c1_mourning_hall", "chapter1", "灵堂", Chapter1Folder, "灵堂区域", "灵堂区域灯影下场景", "按果、糕、酒、香、火的顺序摆放供品，点燃黑灯")
+                .WithLightMessage("供桌残留痕迹浮现：果印、糕屑、杯痕、香灰、烛油。")
+                .AddProp("未摆贡品的供桌", Chapter1Folder + "未摆贡品的供桌.png", new Rect(0.26f, 0.18f, 0.70f, 0.50f), 1f, false, null, "c1_offering_solved")
+                .AddProp("摆满贡品的供桌", Chapter1Folder + "摆满贡品的供桌.png", new Rect(0.26f, 0.18f, 0.70f, 0.50f), 1f, false, "c1_offering_solved")
+                .AddProp("纸人", Chapter1Folder + "纸人.png", new Rect(0.74f, 0.17f, 0.92f, 0.62f), 1f)
+                .AddProp("黑灯已点燃", Chapter1Folder + "黑灯.png", new Rect(0.58f, 0.26f, 0.74f, 0.58f), 1f, false, "c1_lantern_lit")
+                .Add("供桌", new Rect(0.26f, 0.20f, 0.70f, 0.52f), delegate
+                {
+                    if (flags.Contains("c1_offering_solved"))
                     {
+                        Inspect("摆满贡品的供桌", "苹果、糕点、酒杯、香炉、白蜡烛已经归位。黑灯的火光贴着供桌边缘晃动。", Chapter1Folder + "摆满贡品的供桌.png");
                         return;
                     }
-                    GoToScene("c1_bridge");
-                })
-                .Add("回外婆家", new Rect(0.80f, 0.20f, 0.98f, 0.52f), delegate { GoToScene("c1_grandma_home"); }));
 
-            AddScene(new SceneDefinition("c1_well", "chapter1", "老井", Chapter1Folder, "古井", "古井灯影", "用黑灯照井口，找到被藏住的名字")
-                .WithLightMessage("井水出现冷光，名字像从水底慢慢浮上来。")
-                .AddEffect("薄雾", Chapter1Folder + "38_thin_mist", new Rect(0.00f, 0.12f, 1.00f, 0.78f), 6, 0.30f)
-                .AddEffect("井中名字", Chapter1Folder + "VFX/LanternVision/35_name_in_well_effect.png", new Rect(0.24f, 0.18f, 0.78f, 0.62f), 1, 0.70f, true, "c1_lantern_lit")
-                .AddEffect("灯影滤镜", Chapter1Folder + "VFX/LanternVision/31_lantern_vision_filter.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.35f, true)
-                .AddEffect("灯影视角暗角", Chapter1Folder + "VFX/LanternVision/45_vignette_overlay.png", new Rect(0.00f, 0.00f, 1.00f, 1.00f), 1, 0.35f, true)
-                .AddProp("井绳木桶", Chapter1Folder + "29_well_rope_and_bucket.png", new Rect(0.30f, 0.18f, 0.70f, 0.64f), 1f)
-                .AddProp("仪式纸条", Chapter1Folder + "30_clue_paper_ritual_note.png", new Rect(0.56f, 0.20f, 0.76f, 0.42f), 1f, true)
-                .Add("老井", new Rect(0.32f, 0.24f, 0.68f, 0.62f), delegate
+                    Say("林照萤：供桌上的位置是空的，像是在等什么。\n残留痕迹：果印、糕屑、杯痕、香灰、烛油。");
+                })
+                .Add("纸人", new Rect(0.76f, 0.22f, 0.92f, 0.62f), delegate
                 {
-                    if (!NeedFlag("c1_lantern_lit", "需要点燃黑灯。"))
+                    Inspect("纸人", "林照萤：纸人的脸……好像被人重新画过。", Chapter1Folder + "纸人.png");
+                })
+                .Add("摆放供品", new Rect(0.30f, 0.52f, 0.64f, 0.78f), delegate
+                {
+                    ShowOfferingPuzzle();
+                }, null, "c1_offering_solved"));
+
+            AddScene(new SceneDefinition("c1_well", "chapter1", "老井", Chapter1Folder, "老井区域", "老井区域灯影下的场景", "用已点燃的黑灯照井口，找到被藏住的名字")
+                .WithLightMessage("井水出现冷光，名字像从水底慢慢浮上来。")
+                .AddProp("老井", Chapter1Folder + "老井.png", new Rect(0.38f, 0.18f, 0.64f, 0.48f), 1f)
+                .AddProp("井中名字", Chapter1Folder + "井中名字.png", new Rect(0.34f, 0.18f, 0.70f, 0.52f), 1f, true, "c1_lantern_lit")
+                .Add("老井", new Rect(0.34f, 0.18f, 0.70f, 0.56f), delegate
+                {
+                    if (!NeedFlag("c1_lantern_lit", "需要先点燃黑灯。"))
                     {
                         return;
                     }
@@ -2113,10 +2733,9 @@ namespace ChapterGame
                         return;
                     }
 
-                    Inspect("井中名字", "林照萤：水面上浮出的名字，不止一个。\n林照萤：这些名字……为什么会被藏在井里？\n外婆残影：被封住的，不是亡魂。\n外婆残影：是真相。", Chapter1Folder + "VFX/LanternVision/35_name_in_well_effect.png");
+                    Inspect("井中名字", "林照萤：水面上浮出的名字，不止一个。\n林照萤：这些名字……为什么会被藏在井里？\n外婆：被封住的，不是亡魂。\n外婆：是真相。", Chapter1Folder + "井中名字.png");
                     CompleteChapter("第一章结束：归镇。\n下一章：纸马铺 已解锁。");
-                })
-                .Add("回石桥", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c1_bridge"); }));
+                }));
         }
 
         private void BuildChapter2()
@@ -2124,9 +2743,14 @@ namespace ChapterGame
             chapters["chapter2"] = new ChapterDefinition("第二章 纸马铺", "c2_door", "当前目标：进入纸马铺，寻找祭祀线索。");
 
             AddScene(new SceneDefinition("c2_door", "chapter2", "纸马铺门口", Chapter2Folder, "纸马铺门口", null, "进入纸马铺")
-                .Add("招牌", new Rect(0.18f, 0.55f, 0.35f, 0.70f), delegate { Say("“纸马铺”三个字已经褪色，像是被烟熏了很多年。"); })
-                .Add("红灯笼", new Rect(0.57f, 0.45f, 0.74f, 0.72f), delegate { Say("这里可以进入。"); })
-                .Add("进入前厅", new Rect(0.42f, 0.12f, 0.62f, 0.42f), delegate { GoToScene("c2_front"); }));
+                .Add("招牌", new Rect(0.18f, 0.55f, 0.35f, 0.70f), delegate
+                {
+                    SetFlag("c2_door_sign_checked", "“纸马铺”三个字已经褪色，像是被烟熏了很多年。");
+                }, null, "c2_door_sign_checked")
+                .Add("红灯笼", new Rect(Chapter2DoorLanternMinX, 0.31f, Chapter2DoorLanternMaxX, 0.69f), delegate
+                {
+                    SetFlag("c2_door_lantern_checked", "红灯笼照着门口，门缝里透出一线暗光。");
+                }, null, "c2_door_lantern_checked"));
 
             AddScene(new SceneDefinition("c2_front", "chapter2", "前厅", Chapter2Folder, "纸马铺前厅", "纸马铺前厅灯影下场景", "在纸马铺内寻找祭祀线索")
                 .WithLightMessage("柜台下方像藏着暗格，抽屉也被灯影勾出了缝。")
@@ -2142,21 +2766,12 @@ namespace ChapterGame
                     flags.Add("c2_talked_boss");
                     SetObjective("在纸马铺内寻找祭祀线索");
                 })
-                .Add("去纸人架", new Rect(0.78f, 0.18f, 0.96f, 0.48f), delegate { GoToScene("c2_paper_people"); })
                 .Add("柜台账本", new Rect(0.34f, 0.30f, 0.42f, 0.40f), delegate
                 {
                     Inspect("祭祀订单", "黑灯祭用纸人七具，封名纸一匣，纸马一对。账页夹缝里有窗花左下角的纹样。", Chapter2Folder + "调查账本.png");
                     flags.Add("c2_read_account");
                     RebuildProps();
                     RebuildHotspots();
-                })
-                .Add("后院门", new Rect(0.84f, 0.40f, 0.98f, 0.70f), delegate
-                {
-                    if (!NeedItem("后院小钥匙", "门已上锁，需要找到钥匙。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c2_cutting_table");
                 })
                 .AddLight("暗格钥匙", new Rect(0.36f, 0.22f, 0.39f, 0.30f), delegate
                 {
@@ -2175,8 +2790,7 @@ namespace ChapterGame
                 .AddProp("纸人", Chapter2Folder + "纸人.png", new Rect(0.70f, 0.19f, 0.90f, 0.78f), 0.95f, false, null, null, true, 0f, 0.36346f, 0.36346f)
                 .Add("剪纸碎片一", new Rect(0.14f, 0.18f, 0.20f, 0.27f), delegate { Take("剪纸碎片一", "c2_piece1", "你从纸人脚边拾起剪纸碎片一。"); }, null, "c2_piece1")
                 .Add("剪纸碎片二", new Rect(0.63f, 0.18f, 0.68f, 0.26f), delegate { Take("剪纸碎片二", "c2_piece2", "木架下方卡着剪纸碎片二。"); }, null, "c2_piece2")
-                .Add("挂名签纸人", new Rect(0.70f, 0.46f, 0.80f, 0.62f), delegate { Inspect("挂名签", "名签上的名字被涂黑，只剩墨迹干裂后的空白。", Chapter2Folder + "挂名签.png"); })
-                .Add("回前厅", new Rect(0.02f, 0.24f, 0.18f, 0.55f), delegate { GoToScene("c2_front"); }));
+                .Add("挂名签纸人", new Rect(0.70f, 0.46f, 0.80f, 0.62f), delegate { Inspect("挂名签", "名签上的名字被涂黑，只剩墨迹干裂后的空白。", Chapter2Folder + "挂名签.png"); }));
 
             AddScene(new SceneDefinition("c2_cutting_table", "chapter2", "剪纸台", Chapter2Folder, "剪纸台区域", null, "调查后面的剪纸台")
                 .AddProp("调查剪纸台", Chapter2Folder + "调查剪纸台.png", new Rect(0.50f, 0.18f, 0.84f, 0.64f), 1f, false, "c2_cutting_table_revealed", null, true, 0f, 0.62291f, 0.62291f)
@@ -2218,15 +2832,7 @@ namespace ChapterGame
                     SetFlag("c2_projection_seen", "墙上浮出字影：“纸未尽，名未灭。火过三分，残页可现。” 当前目标：前往焚纸炉，寻找未烧尽的残页。");
                     SetObjective("前往焚纸炉，寻找未烧尽的残页");
                 })
-                .Add("去焚纸炉", new Rect(0.84f, 0.16f, 0.98f, 0.46f), delegate
-                {
-                    if (!NeedFlag("c2_projection_seen", "还没有得到焚纸炉的提示。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c2_furnace");
-                })
-                .Add("回前厅", new Rect(0.02f, 0.18f, 0.18f, 0.50f), delegate { GoToScene("c2_front"); }));
+                );
 
             AddScene(new SceneDefinition("c2_furnace", "chapter2", "焚纸炉", Chapter2Folder, "焚纸炉区域", "焚火炉区域灯影下场景", "取出未烧尽的残页")
                 .WithLightMessage("炉灰里有微弱红光，像压着没有烧完的东西。")
@@ -2255,8 +2861,7 @@ namespace ChapterGame
                     RebuildProps();
                     CompleteChapter("想知道名字去哪了，就去听那出无声戏。第二章结束，第三章「无声戏台」已解锁。");
                 })
-                .Add("焚纸炉拖拽解密", new Rect(0.58f, 0.22f, 0.86f, 0.68f), delegate { ShowFurnacePuzzle(); }, null, "c2_page_read")
-                .Add("回剪纸台", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c2_cutting_table"); }));
+                .Add("焚纸炉拖拽解密", new Rect(0.58f, 0.22f, 0.86f, 0.68f), delegate { ShowFurnacePuzzle(); }, null, "c2_page_read"));
         }
 
         private void BuildChapter3()
@@ -2268,7 +2873,10 @@ namespace ChapterGame
                 .AddProp("戏文残页", Chapter3Folder + "戏文残页.png", new Rect(0.20f, 0.16f, 0.34f, 0.32f), 1f, false, null, "c3_script", true, 0f, 0.54038f, 0.54038f)
                 .AddProp("鼓棒", Chapter3Folder + "鼓棒.png", new Rect(0.30f, 0.17f, 0.40f, 0.28f), 1f, false, null, "c3_script", true, 0f, 1f, 1f)
                 .AddProp("地下通道入口", Chapter3Folder + "地下通道入口.png", new Rect(0.42f, 0.12f, 0.62f, 0.34f), 1f, false, "c3_tunnel_entrance_open")
-                .Add("无声戏台", new Rect(0.12f, 0.62f, 0.34f, 0.78f), delegate { Say("无声戏台。戏牌破损，边缘像被水泡过。"); })
+                .Add("无声戏台", new Rect(0.12f, 0.62f, 0.34f, 0.78f), delegate
+                {
+                    SetFlag("c3_stage_checked", "无声戏台。戏牌破损，边缘像被水泡过。");
+                }, null, "c3_stage_checked")
                 .Add("陈望川对话", new Rect(0.60f, 0.30f, 0.74f, 0.70f), delegate
                 {
                     Inspect("戏台前场",
@@ -2308,22 +2916,7 @@ namespace ChapterGame
                     SetFlag("c3_stage_words", "画上是一条河和一艘纸船。随后舞台中央浮现三个字：“面、锣、门。” 去后台寻找面具。");
                     SetObjective("去后台寻找面具");
                 })
-                .Add("进入后台", new Rect(0.78f, 0.20f, 0.96f, 0.55f), delegate
-                {
-                    if (!NeedFlag("c3_stage_words", "舞台上还没有出现提示。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c3_backstage");
-                })
-                .Add("地下通道入口", new Rect(0.42f, 0.12f, 0.62f, 0.34f), delegate
-                {
-                    if (!NeedFlag("c3_tunnel_entrance_open", "舞台地板还没有打开。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c3_tunnel");
-                }, "c3_tunnel_entrance_open"));
+                );
 
             AddScene(new SceneDefinition("c3_backstage", "chapter3", "后台", Chapter3Folder, "后台区域", "后台区域灯影下的场景", "收集傩面，打开地下通道")
                 .WithLightMessage("墙上出现提示：“先笑，后哭，最后忘了自己。”")
@@ -2338,23 +2931,13 @@ namespace ChapterGame
                 .AddLight("面具机关", new Rect(0.34f, 0.54f, 0.66f, 0.78f), delegate
                 {
                     ShowMaskPuzzle();
-                })
-                .Add("回戏台", new Rect(0.02f, 0.22f, 0.18f, 0.52f), delegate { GoToScene("c3_stage"); }));
+                }));
 
             AddScene(new SceneDefinition("c3_tunnel", "chapter3", "地下通道", Chapter3Folder, "地下通道区域", "地下通道区域灯影下场景", "获得封名残纸，前往河岸")
                 .WithLightMessage("墙面浮现大量被划掉的名字。其中一个名字只剩两个字：“望月。”\n林照萤：望月……这是一个人的名字？\n陈望川：别再念了。")
                 .AddProp("封名残纸", Chapter3Folder + "普通视角下的名单碎片.png", new Rect(0.24f, 0.18f, 0.40f, 0.34f), 1f, false, null, "c3_name_paper", true, 0f, 0.56392f, 0.56392f)
                 .Add("封名残纸", new Rect(0.27f, 0.21f, 0.37f, 0.31f), delegate { Take("封名残纸", "c3_name_paper", "你拾起地上的湿纸，获得封名残纸。"); }, null, "c3_name_paper")
-                .Add("旧灯笼", new Rect(0.48f, 0.30f, 0.62f, 0.56f), delegate { Say("灯笼里没有灯芯，却有焦味。"); })
-                .Add("地下通道入口", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c3_stage"); })
-                .AddLight("去河岸断桥", new Rect(0.76f, 0.22f, 0.96f, 0.55f), delegate
-                {
-                    if (!NeedItem("封名残纸", "你还没有拿到封名残纸。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c3_bridge");
-                }));
+                .Add("旧灯笼", new Rect(0.48f, 0.30f, 0.62f, 0.56f), delegate { Say("灯笼里没有灯芯，却有焦味。"); }));
 
             AddScene(new SceneDefinition("c3_bridge", "chapter3", "河岸断桥", Chapter3Folder, "河岸断桥", "河岸断桥区域灯影下的场景", "打开水闸，获得名单碎片")
                 .WithLightMessage("桥下出现沉船残影。一个女孩站在船头，手里捧着黑灯。")
@@ -2394,44 +2977,29 @@ namespace ChapterGame
                     SetObjective("登上祭船");
                     Inspect("灯影名单碎片", "灯影下的碎片补全：望月。替灯入船。", Chapter3Folder + "灯影视角下的名单碎片.png");
                 })
-                .Add("进入祭船", new Rect(0.82f, 0.18f, 0.98f, 0.48f), delegate
-                {
-                    if (!NeedFlag("c3_ghost_seen", "还没有看到登船提示。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c3_boat");
-                })
-                .Add("回地下通道", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c3_tunnel"); }));
+                );
 
             AddScene(new SceneDefinition("c3_boat", "chapter3", "祭船船舱", Chapter3Folder, "祭船船舱暗室区域", "祭船船舱暗示区域灯影下场景", "获得名牌，进入船舱暗室")
                 .WithLightMessage("船舱里坐着几个无脸亡魂。屏幕文字显示：“把她的名字还回来。”")
-                .AddProp("半块名牌", Chapter3Folder + "半块名牌.png", new Rect(0.16f, 0.12f, 0.25f, 0.30f), 1f, false, null, "c3_half_tag", true, 41f, 0.42980f, 0.42980f)
-                .AddProp("陈望月名牌", Chapter3Folder + "陈望月名牌.png", new Rect(0.13f, 0.15f, 0.24f, 0.46f), 1f, true, null, "c3_full_tag", true, 0f, 0.26801f, 0.26801f)
-                .Add("船舱", new Rect(0.18f, 0.17f, 0.23f, 0.25f), delegate
+                .AddProp("半块名牌", Chapter3Folder + "半块名牌.png", new Rect(0.76f, 0.22f, 0.86f, 0.38f), 1f, false, null, "c3_half_tag", true, 41f, 0.42980f, 0.42980f)
+                .AddProp("陈望月名牌", Chapter3Folder + "陈望月名牌.png", new Rect(0.76f, 0.22f, 0.86f, 0.42f), 1f, true, null, "c3_full_tag", true, 0f, 0.26801f, 0.26801f)
+                .Add("半块名牌", new Rect(0.74f, 0.20f, 0.88f, 0.42f), delegate
                 {
                     Take("半块名牌", "c3_half_tag", "你在船舱里获得半块名牌。");
                     Inspect("半块名牌", "半块名牌边缘有新裂口，像是在等待另一半名字。", Chapter3Folder + "半块名牌.png");
                 }, null, "c3_half_tag")
-                .AddLight("桥灯", new Rect(0.16f, 0.20f, 0.22f, 0.40f), delegate
+                .AddLight("补全名牌", new Rect(0.74f, 0.20f, 0.88f, 0.46f), delegate
                 {
-                    if (!NeedItem("半块名牌", "先在船舱里找到半块名牌。"))
+                    if (!HasItemOrFlag("半块名牌", "c3_half_tag"))
                     {
+                        Say("先在船舱里找到半块名牌。");
                         return;
                     }
                     Take("陈望月名牌", "c3_full_tag", "桥灯照过半块名牌，名牌自动补全：陈望月。");
                     Inspect("陈望月名牌", "陈望月。她在等自己的名字。", Chapter3Folder + "陈望月名牌.png");
                     SetObjective("使用陈望月名牌进入船舱暗室");
                 }, null, "c3_full_tag")
-                .Add("进入暗室", new Rect(0.78f, 0.20f, 0.96f, 0.52f), delegate
-                {
-                    if (!NeedItem("陈望月名牌", "没有陈望月名牌，暗门不会打开。"))
-                    {
-                        return;
-                    }
-                    GoToScene("c3_darkroom");
-                })
-                .Add("回断桥", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c3_bridge"); }));
+                );
 
             AddScene(new SceneDefinition("c3_darkroom", "chapter3", "船舱暗室", Chapter3Folder, "祭船船舱暗室区域", "祭船船舱暗示区域灯影下场景", "补全族谱上的名字")
                 .WithLightMessage("残破族谱的空位上，墨迹反复吞吐着一个“陈”字。")
@@ -2475,8 +3043,7 @@ namespace ChapterGame
                         return;
                     }
                     CompleteChapter("归名之人，须上灯楼。\n林照萤：我会把你的名字带回去。\n陈望川：那就去灯楼吧。但进了灯楼，就没有回头路了。\n第三章结束。最终章：无声灯楼 已解锁。");
-                })
-                .Add("回祭船", new Rect(0.02f, 0.20f, 0.18f, 0.52f), delegate { GoToScene("c3_boat"); }));
+                }));
         }
 
         private void BuildChapter4()
@@ -2521,15 +3088,15 @@ namespace ChapterGame
 
             AddScene(new SceneDefinition("c4_genealogy", "chapter4", "族谱室", Chapter4Folder, "族谱室", "族谱室灯影下的场景", "点亮三盏灯，查看封名真相")
                 .WithLightMessage("三盏灯上方浮现三段文字：“陈望月”“替灯入船”“林照萤”。先点灯，再点对应文字。")
-                .AddProp("族谱", Chapter4Folder + "族谱.png", new Rect(0.42f, 0.18f, 0.62f, 0.42f), 1f, false, null, "c4_truth_genealogy")
-                .AddProp("打开的族谱", Chapter4Folder + "打开的族谱.png", new Rect(0.35f, 0.17f, 0.69f, 0.46f), 1f, false, "c4_truth_genealogy")
+                .AddProp("族谱", Chapter4Folder + "族谱.png", new Rect(0.42f, 0.28f, 0.62f, 0.72f), 1f, false, null, "c4_truth_genealogy")
+                .AddProp("打开的族谱", Chapter4Folder + "打开的族谱.png", new Rect(0.35f, 0.28f, 0.69f, 0.72f), 1f, false, "c4_truth_genealogy")
                 .AddProp("未点亮的红灯", Chapter4Folder + "未点亮的红灯.png", new Rect(0.23f, 0.20f, 0.38f, 0.52f), 1f, false, null, "c4_red_lit")
                 .AddProp("点亮的红灯", Chapter4Folder + "点亮的红灯.png", new Rect(0.23f, 0.20f, 0.38f, 0.52f), 1f, false, "c4_red_lit")
                 .AddProp("未点亮的白灯", Chapter4Folder + "未点亮的白灯.png", new Rect(0.43f, 0.15f, 0.58f, 0.47f), 1f, false, null, "c4_white_lit")
                 .AddProp("点亮的白灯", Chapter4Folder + "点亮的白灯.png", new Rect(0.43f, 0.15f, 0.58f, 0.47f), 1f, false, "c4_white_lit")
                 .AddProp("未点亮的黑灯", Chapter4Folder + "未点亮的黑灯.png", new Rect(0.63f, 0.20f, 0.80f, 0.54f), 1f, false, null, "c4_black_lit")
                 .AddProp("点亮的黑灯", Chapter4Folder + "点亮的黑灯.png", new Rect(0.63f, 0.20f, 0.80f, 0.54f), 1f, false, "c4_black_lit")
-                .Add("合上的族谱", new Rect(0.40f, 0.16f, 0.64f, 0.46f), delegate
+                .Add("合上的族谱", new Rect(0.40f, 0.28f, 0.64f, 0.72f), delegate
                 {
                     if (!NeedFlag("c4_all_lit", "族谱被锁住了，似乎需要先点亮前方的灯。"))
                     {
