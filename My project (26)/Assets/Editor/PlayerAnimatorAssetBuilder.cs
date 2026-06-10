@@ -12,15 +12,17 @@ namespace ChapterGame.EditorTools
     public static class PlayerAnimatorAssetBuilder
     {
         private const string CharacterFolder = "Assets/素材和策划案/角色动作";
+        private const string BuilderPath = "Assets/Editor/PlayerAnimatorAssetBuilder.cs";
         private const string OutputFolder = "Assets/Animations/Player";
         private const string ControllerPath = OutputFolder + "/PlayerAnimator.controller";
         private const float IdleHeight = 430f;
+        private const float DisplayHeight = 360f;
 
         private static readonly SheetSpec[] Sheets =
         {
-            new SheetSpec("待机", CharacterFolder + "/待机.png", 4, 2, 1, 4f, 0),
-            new SheetSpec("行走", CharacterFolder + "/行走.png", 8, 1, 8, 10f, 1),
-            new SheetSpec("举灯", CharacterFolder + "/举灯动作.png", 6, 1, 6, 4f, 2),
+            new SheetSpec("待机", CharacterFolder + "/待机1.png", 5, 1, 1, 4f, 0),
+            new SheetSpec("行走", CharacterFolder + "/行走1.png", 8, 1, 8, 10f, 1),
+            new SheetSpec("举灯", CharacterFolder + "/提灯.jpg", 8, 1, 8, 4f, 2),
         };
 
         static PlayerAnimatorAssetBuilder()
@@ -34,10 +36,17 @@ namespace ChapterGame.EditorTools
             Directory.CreateDirectory(OutputFolder);
 
             var clips = new List<AnimationClip>();
+            var spritesBySheet = new Dictionary<SheetSpec, Sprite[]>();
             foreach (var sheet in Sheets)
             {
                 var sprites = SliceSheet(sheet);
-                var clip = BuildClip(sheet, sprites);
+                spritesBySheet[sheet] = sprites;
+            }
+
+            var displayWidth = DisplayHeight * GetWalkAspect(spritesBySheet);
+            foreach (var sheet in Sheets)
+            {
+                var clip = BuildClip(sheet, spritesBySheet[sheet], displayWidth);
                 clips.Add(clip);
             }
 
@@ -49,10 +58,31 @@ namespace ChapterGame.EditorTools
 
         private static void BuildIfMissing()
         {
-            if (!File.Exists(ControllerPath) || Sheets.Any(sheet => !File.Exists(GetClipPath(sheet))))
+            if (!File.Exists(ControllerPath) || Sheets.Any(NeedsRebuild))
             {
                 Build();
             }
+        }
+
+        private static bool NeedsRebuild(SheetSpec sheet)
+        {
+            var clipPath = GetClipPath(sheet);
+            if (!File.Exists(clipPath))
+            {
+                return true;
+            }
+
+            if (!File.Exists(sheet.Path))
+            {
+                return true;
+            }
+
+            var sourceTime = File.GetLastWriteTimeUtc(sheet.Path);
+            var builderTime = File.Exists(BuilderPath) ? File.GetLastWriteTimeUtc(BuilderPath) : sourceTime;
+            return sourceTime > File.GetLastWriteTimeUtc(clipPath)
+                || sourceTime > File.GetLastWriteTimeUtc(ControllerPath)
+                || builderTime > File.GetLastWriteTimeUtc(clipPath)
+                || builderTime > File.GetLastWriteTimeUtc(ControllerPath);
         }
 
         private static Sprite[] SliceSheet(SheetSpec sheet)
@@ -106,21 +136,64 @@ namespace ChapterGame.EditorTools
             var readable = new Texture2D(2, 2);
             readable.LoadImage(bytes);
 
-            var rects = new List<Rect>();
             var cellWidth = readable.width / sheet.Columns;
             var cellHeight = readable.height / sheet.Rows;
+            var sharedTrim = GetSharedTransparentTrim(readable, sheet, cellWidth, cellHeight);
+            var rects = new List<Rect>();
             for (var i = 0; i < sheet.FrameCount; i++)
             {
                 var column = i % sheet.Columns;
                 var rowFromTop = i / sheet.Columns;
                 var x = column * cellWidth;
                 var y = readable.height - (rowFromTop + 1) * cellHeight;
-                var source = new RectInt(x, y, cellWidth, cellHeight);
-                rects.Add(TrimTransparentPixels(readable, source));
+                rects.Add(new Rect(x + sharedTrim.x, y + sharedTrim.y, sharedTrim.width, sharedTrim.height));
             }
 
             Object.DestroyImmediate(readable);
             return rects;
+        }
+
+        private static RectInt GetSharedTransparentTrim(Texture2D texture, SheetSpec sheet, int cellWidth, int cellHeight)
+        {
+            var minX = cellWidth;
+            var minY = cellHeight;
+            var maxX = -1;
+            var maxY = -1;
+
+            for (var i = 0; i < sheet.FrameCount; i++)
+            {
+                var column = i % sheet.Columns;
+                var rowFromTop = i / sheet.Columns;
+                var startX = column * cellWidth;
+                var startY = texture.height - (rowFromTop + 1) * cellHeight;
+                for (var y = 0; y < cellHeight; y++)
+                {
+                    for (var x = 0; x < cellWidth; x++)
+                    {
+                        if (texture.GetPixel(startX + x, startY + y).a <= 0.03f)
+                        {
+                            continue;
+                        }
+
+                        minX = Mathf.Min(minX, x);
+                        minY = Mathf.Min(minY, y);
+                        maxX = Mathf.Max(maxX, x);
+                        maxY = Mathf.Max(maxY, y);
+                    }
+                }
+            }
+
+            if (maxX < minX || maxY < minY)
+            {
+                return new RectInt(0, 0, cellWidth, cellHeight);
+            }
+
+            const int padding = 2;
+            minX = Mathf.Max(0, minX - padding);
+            minY = Mathf.Max(0, minY - padding);
+            maxX = Mathf.Min(cellWidth - 1, maxX + padding);
+            maxY = Mathf.Min(cellHeight - 1, maxY + padding);
+            return new RectInt(minX, minY, maxX - minX + 1, maxY - minY + 1);
         }
 
         private static Rect TrimTransparentPixels(Texture2D texture, RectInt source)
@@ -160,7 +233,7 @@ namespace ChapterGame.EditorTools
             return new Rect(source.x + minX, source.y + minY, maxX - minX + 1, maxY - minY + 1);
         }
 
-        private static AnimationClip BuildClip(SheetSpec sheet, Sprite[] sprites)
+        private static AnimationClip BuildClip(SheetSpec sheet, Sprite[] sprites, float displayWidth)
         {
             var clipPath = GetClipPath(sheet);
             var clip = AssetDatabase.LoadAssetAtPath<AnimationClip>(clipPath);
@@ -189,9 +262,8 @@ namespace ChapterGame.EditorTools
             var imageBinding = EditorCurveBinding.PPtrCurve("", typeof(Image), "m_Sprite");
             AnimationUtility.SetObjectReferenceCurve(clip, imageBinding, keys);
 
-            var width = IdleHeight * GetAverageAspect(sprites);
-            SetConstantCurve(clip, typeof(RectTransform), "m_SizeDelta.x", width);
-            SetConstantCurve(clip, typeof(RectTransform), "m_SizeDelta.y", IdleHeight);
+            SetConstantCurve(clip, typeof(RectTransform), "m_SizeDelta.x", displayWidth);
+            SetConstantCurve(clip, typeof(RectTransform), "m_SizeDelta.y", DisplayHeight);
 
             EditorUtility.SetDirty(clip);
             return clip;
@@ -217,6 +289,19 @@ namespace ChapterGame.EditorTools
             }
 
             return total / sprites.Length;
+        }
+
+        private static float GetWalkAspect(IReadOnlyDictionary<SheetSpec, Sprite[]> spritesBySheet)
+        {
+            foreach (var pair in spritesBySheet)
+            {
+                if (pair.Key.StateValue == 1)
+                {
+                    return GetAverageAspect(pair.Value);
+                }
+            }
+
+            return 1f;
         }
 
         private static void BuildController(IReadOnlyList<AnimationClip> clips)

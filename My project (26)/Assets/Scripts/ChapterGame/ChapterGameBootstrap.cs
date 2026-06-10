@@ -25,6 +25,7 @@ namespace ChapterGame
         private const string BgmPath = "Assets/BGM.mp3";
         private const float PlayerIdleWidth = 143.31f;
         private const float PlayerIdleHeight = 430f;
+        private const float PlayerDisplayHeight = 360f;
         private const float Chapter2DoorLanternMinX = 0.36f;
         private const float Chapter2DoorLanternMaxX = 0.64f;
         private const string BoundaryBlocked = "__blocked";
@@ -81,6 +82,8 @@ namespace ChapterGame
         private Image[] genericPuzzleSlotImages = new Image[0];
         private readonly Dictionary<string, GameObject> genericPuzzlePieces = new Dictionary<string, GameObject>();
         private Action genericPuzzleComplete;
+        private GameObject cuttingTablePanel;
+        private Text cuttingTableHint;
         private Coroutine dialogueCoroutine;
         private int dialogueLineIndex;
         private string dialogueFullLine = "";
@@ -99,6 +102,7 @@ namespace ChapterGame
         private readonly List<Sprite> playerIdleFrames = new List<Sprite>();
         private readonly List<Sprite> playerWalkFrames = new List<Sprite>();
         private readonly List<Sprite> playerLanternFrames = new List<Sprite>();
+        private Vector2 playerDisplaySize = new Vector2(PlayerIdleWidth, PlayerIdleHeight);
         private List<Sprite> currentPlayerFrames;
         private float playerX = 0.28f;
         private float playerFrameTime;
@@ -207,13 +211,18 @@ namespace ChapterGame
                 HideGenericPuzzle();
             }
 
+            if (Input.GetKeyDown(KeyCode.Escape) && cuttingTablePanel != null && cuttingTablePanel.activeSelf)
+            {
+                HideCuttingTableCloseup();
+            }
+
             UpdateBoundaryNavigationPrompt();
-            if (Input.GetKeyDown(KeyCode.E) && TryActivateBoundaryNavigation())
+            if (Input.GetKeyDown(KeyCode.E) && currentChapterId != "chapter2" && TryActivateBoundaryNavigation())
             {
                 return;
             }
 
-            if (Input.GetKeyDown(KeyCode.E) && !modal.activeSelf && !dialoguePanel.activeSelf && (maskPuzzlePanel == null || !maskPuzzlePanel.activeSelf) && (genericPuzzlePanel == null || !genericPuzzlePanel.activeSelf) && currentHoverHotspot != null)
+            if (Input.GetKeyDown(KeyCode.E) && currentChapterId != "chapter2" && !modal.activeSelf && !dialoguePanel.activeSelf && (maskPuzzlePanel == null || !maskPuzzlePanel.activeSelf) && (genericPuzzlePanel == null || !genericPuzzlePanel.activeSelf) && (cuttingTablePanel == null || !cuttingTablePanel.activeSelf) && currentHoverHotspot != null)
             {
                 InvokeHotspot(currentHoverHotspot);
             }
@@ -522,6 +531,7 @@ namespace ChapterGame
             currentHoverHotspot = null;
             ClearBoundaryNavigationPrompt();
             HideDialogue();
+            HideCuttingTableCloseup();
             ClearModalActions();
             if (modal != null)
             {
@@ -1168,6 +1178,7 @@ namespace ChapterGame
             HideDialogue();
             modal.SetActive(false);
             HideMaskPuzzle();
+            HideCuttingTableCloseup();
 
             Array.Clear(maskPuzzleSlots, 0, maskPuzzleSlots.Length);
             Array.Clear(maskPuzzleSlotRects, 0, maskPuzzleSlotRects.Length);
@@ -1336,12 +1347,13 @@ namespace ChapterGame
             maskPuzzlePieces.Clear();
         }
 
-        private void ShowGenericPuzzle(string title, string previewPath, string hint, string[] slotLabels, PuzzlePiece[] pieces, string[] correctOrder, Action onComplete)
+        private void ShowGenericPuzzle(string title, string previewPath, string hint, string[] slotLabels, PuzzlePiece[] pieces, string[] correctOrder, Action onComplete, bool showSlotLabels = true, bool useTwoByTwoSlots = false)
         {
             HideDialogue();
             modal.SetActive(false);
             HideMaskPuzzle();
             HideGenericPuzzle();
+            HideCuttingTableCloseup();
 
             genericPuzzleSlots = new string[slotLabels.Length];
             genericPuzzleCorrect = correctOrder;
@@ -1349,6 +1361,12 @@ namespace ChapterGame
             genericPuzzleSlotImages = new Image[slotLabels.Length];
             genericPuzzlePieces.Clear();
             genericPuzzleComplete = onComplete;
+            useTwoByTwoSlots = useTwoByTwoSlots || (slotLabels.Length == 4 && pieces.Length == 4);
+            var displayPieces = pieces;
+            if (useTwoByTwoSlots && pieces.Length == 4)
+            {
+                displayPieces = new[] { pieces[2], pieces[0], pieces[3], pieces[1] };
+            }
 
             genericPuzzlePanel = CreatePanel("Generic Puzzle", canvas.transform, new Color(0f, 0f, 0f, 0.70f)).gameObject;
             Stretch(genericPuzzlePanel.GetComponent<RectTransform>());
@@ -1377,28 +1395,53 @@ namespace ChapterGame
             var close = CreateButton("Puzzle Close", board, "关闭", 22, HideGenericPuzzle);
             Anchor(close.GetComponent<RectTransform>(), new Vector2(0.82f, 0.89f), new Vector2(0.94f, 0.97f), Vector2.zero, Vector2.zero);
 
-            var slotWidth = Mathf.Min(0.13f, 0.70f / Mathf.Max(1, slotLabels.Length));
-            var slotGap = Mathf.Min(0.025f, 0.12f / Mathf.Max(1, slotLabels.Length));
-            var slotTotal = slotLabels.Length * slotWidth + (slotLabels.Length - 1) * slotGap;
-            var slotStart = 0.5f - slotTotal * 0.5f;
-            for (var i = 0; i < slotLabels.Length; i++)
+            if (useTwoByTwoSlots && slotLabels.Length == 4)
             {
-                var x = slotStart + i * (slotWidth + slotGap);
-                CreateGenericPuzzleSlot(board, i, new Vector2(x, 0.48f), new Vector2(x + slotWidth, 0.72f), slotLabels[i]);
+                var slotMin = new[]
+                {
+                    new Vector2(0.40f, 0.60f),
+                    new Vector2(0.52f, 0.60f),
+                    new Vector2(0.40f, 0.39f),
+                    new Vector2(0.52f, 0.39f)
+                };
+                var slotMax = new[]
+                {
+                    new Vector2(0.50f, 0.78f),
+                    new Vector2(0.62f, 0.78f),
+                    new Vector2(0.50f, 0.57f),
+                    new Vector2(0.62f, 0.57f)
+                };
+
+                for (var i = 0; i < slotLabels.Length; i++)
+                {
+                    CreateGenericPuzzleSlot(board, i, slotMin[i], slotMax[i], slotLabels[i], showSlotLabels);
+                }
+            }
+            else
+            {
+                var slotWidth = Mathf.Min(0.13f, 0.70f / Mathf.Max(1, slotLabels.Length));
+                var slotGap = Mathf.Min(0.025f, 0.12f / Mathf.Max(1, slotLabels.Length));
+                var slotTotal = slotLabels.Length * slotWidth + (slotLabels.Length - 1) * slotGap;
+                var slotStart = 0.5f - slotTotal * 0.5f;
+                for (var i = 0; i < slotLabels.Length; i++)
+                {
+                    var x = slotStart + i * (slotWidth + slotGap);
+                    CreateGenericPuzzleSlot(board, i, new Vector2(x, 0.48f), new Vector2(x + slotWidth, 0.72f), slotLabels[i], showSlotLabels);
+                }
             }
 
-            var pieceWidth = Mathf.Min(0.12f, 0.78f / Mathf.Max(1, pieces.Length));
-            var pieceGap = Mathf.Min(0.03f, 0.16f / Mathf.Max(1, pieces.Length));
-            var pieceTotal = pieces.Length * pieceWidth + (pieces.Length - 1) * pieceGap;
+            var pieceWidth = Mathf.Min(0.12f, 0.78f / Mathf.Max(1, displayPieces.Length));
+            var pieceGap = Mathf.Min(0.03f, 0.16f / Mathf.Max(1, displayPieces.Length));
+            var pieceTotal = displayPieces.Length * pieceWidth + (displayPieces.Length - 1) * pieceGap;
             var pieceStart = 0.5f - pieceTotal * 0.5f;
-            for (var i = 0; i < pieces.Length; i++)
+            for (var i = 0; i < displayPieces.Length; i++)
             {
                 var x = pieceStart + i * (pieceWidth + pieceGap);
-                CreateGenericPuzzlePiece(board, pieces[i], new Vector2(x, 0.20f), new Vector2(x + pieceWidth, 0.42f));
+                CreateGenericPuzzlePiece(board, displayPieces[i], new Vector2(x, 0.20f), new Vector2(x + pieceWidth, 0.42f));
             }
         }
 
-        private void CreateGenericPuzzleSlot(RectTransform parent, int index, Vector2 min, Vector2 max, string label)
+        private void CreateGenericPuzzleSlot(RectTransform parent, int index, Vector2 min, Vector2 max, string label, bool showLabel)
         {
             var slot = CreateImage("Puzzle Slot " + index, parent, new Color(0.18f, 0.12f, 0.06f, 0.62f));
             Anchor(slot.rectTransform, min, max, Vector2.zero, Vector2.zero);
@@ -1410,10 +1453,13 @@ namespace ChapterGame
             genericPuzzleSlotRects[index] = slot.rectTransform;
             genericPuzzleSlotImages[index] = slot;
 
-            var text = CreateText(label, slot.transform, 18, TextAnchor.LowerCenter);
-            Stretch(text.rectTransform);
-            text.text = label;
-            text.raycastTarget = false;
+            if (showLabel)
+            {
+                var text = CreateText(label, slot.transform, 18, TextAnchor.LowerCenter);
+                Stretch(text.rectTransform);
+                text.text = label;
+                text.raycastTarget = false;
+            }
         }
 
         private void CreateGenericPuzzlePiece(RectTransform parent, PuzzlePiece pieceData, Vector2 min, Vector2 max)
@@ -1539,22 +1585,102 @@ namespace ChapterGame
             genericPuzzleComplete = null;
         }
 
+        private void ShowCuttingTableCloseup()
+        {
+            HideDialogue();
+            modal.SetActive(false);
+            HideMaskPuzzle();
+            HideGenericPuzzle();
+            HideCuttingTableCloseup();
+
+            SetPlayerVisible(false);
+
+            cuttingTablePanel = CreatePanel("Cutting Table Closeup", canvas.transform, new Color(0f, 0f, 0f, 0.72f)).gameObject;
+            Stretch(cuttingTablePanel.GetComponent<RectTransform>());
+
+            var board = CreatePanel("Cutting Table Board", cuttingTablePanel.transform, new Color(0.03f, 0.022f, 0.016f, 0.96f));
+            Anchor(board, new Vector2(0.05f, 0.08f), new Vector2(0.95f, 0.90f), Vector2.zero, Vector2.zero);
+
+            var table = CreateImage("Cutting Table Image", board, Color.white);
+            Anchor(table.rectTransform, new Vector2(0.02f, 0.10f), new Vector2(0.98f, 0.92f), Vector2.zero, Vector2.zero);
+            table.sprite = LoadSprite(Chapter2Folder + "调查剪纸台.png");
+            table.preserveAspect = false;
+            table.raycastTarget = false;
+
+            var title = CreateText("Cutting Table Title", board, 28, TextAnchor.MiddleLeft);
+            Anchor(title.rectTransform, new Vector2(0.04f, 0.91f), new Vector2(0.55f, 0.99f), Vector2.zero, Vector2.zero);
+            title.text = "调查剪纸台";
+
+            cuttingTableHint = CreateText("Cutting Table Hint", board, 20, TextAnchor.MiddleLeft);
+            Anchor(cuttingTableHint.rectTransform, new Vector2(0.04f, 0.02f), new Vector2(0.70f, 0.09f), Vector2.zero, Vector2.zero);
+            cuttingTableHint.text = "拿走浆糊刷和剪纸碎片四。";
+
+            var close = CreateButton("Cutting Table Close", board, "关闭", 22, HideCuttingTableCloseup);
+            Anchor(close.GetComponent<RectTransform>(), new Vector2(0.84f, 0.92f), new Vector2(0.96f, 0.985f), Vector2.zero, Vector2.zero);
+
+            CreateCuttingTablePickup(board, "浆糊刷", "c2_brush", Chapter2Folder + "浆糊刷.png", new Rect(0.27f, 0.26f, 0.42f, 0.62f), "你拿到了浆糊刷。");
+            CreateCuttingTablePickup(board, "剪纸碎片四", "c2_piece4", Chapter2Folder + "剪纸碎片四.png", new Rect(0.60f, 0.33f, 0.78f, 0.66f), "红纸堆里藏着剪纸碎片四。");
+        }
+
+        private void CreateCuttingTablePickup(RectTransform parent, string itemName, string flag, string spritePath, Rect area, string message)
+        {
+            if (flags.Contains(flag))
+            {
+                return;
+            }
+
+            var propImage = CreateImage(itemName + " Image", parent, Color.white);
+            Anchor(propImage.rectTransform, new Vector2(area.x, area.y), new Vector2(area.width, area.height), Vector2.zero, Vector2.zero);
+            propImage.sprite = LoadSprite(spritePath);
+            propImage.preserveAspect = true;
+            propImage.raycastTarget = false;
+
+            var button = CreateButton(itemName + " Pickup", parent, "", 1, delegate { }, false);
+            Anchor(button.GetComponent<RectTransform>(), new Vector2(area.x, area.y), new Vector2(area.width, area.height), Vector2.zero, Vector2.zero);
+            button.onClick.AddListener(delegate
+            {
+                Take(itemName, flag, message);
+                propImage.gameObject.SetActive(false);
+                button.gameObject.SetActive(false);
+                if (cuttingTableHint != null)
+                {
+                    cuttingTableHint.text = flags.Contains("c2_brush") && flags.Contains("c2_piece4")
+                        ? "道具已经拿齐，可以关闭。"
+                        : "继续寻找剩下的道具。";
+                }
+            });
+        }
+
+        private void HideCuttingTableCloseup()
+        {
+            if (cuttingTablePanel == null)
+            {
+                return;
+            }
+
+            Destroy(cuttingTablePanel);
+            cuttingTablePanel = null;
+            cuttingTableHint = null;
+            ShowPlayerInScene();
+        }
+
         private void ShowOfferingPuzzle()
         {
             ShowGenericPuzzle("供品顺序",
                 Chapter1Folder + "摆满贡品的供桌.png",
-                "拖动供品到五个位置。残留痕迹提示：果、糕、酒、香、火。",
+                "拖动供品到五个位置。看供桌上的残留痕迹决定顺序。",
                 new[] { "果", "糕", "酒", "香", "火" },
                 new[]
                 {
-                    new PuzzlePiece("苹果", Chapter1Folder + "苹果.png"),
-                    new PuzzlePiece("糕点", Chapter1Folder + "糕点.png"),
                     new PuzzlePiece("酒杯", Chapter1Folder + "酒杯.png"),
+                    new PuzzlePiece("白蜡烛", Chapter1Folder + "白蜡烛.png"),
+                    new PuzzlePiece("苹果", Chapter1Folder + "苹果.png"),
                     new PuzzlePiece("香炉", Chapter1Folder + "香炉.png"),
-                    new PuzzlePiece("白蜡烛", Chapter1Folder + "白蜡烛.png")
+                    new PuzzlePiece("糕点", Chapter1Folder + "糕点.png")
                 },
                 new[] { "苹果", "糕点", "酒杯", "香炉", "白蜡烛" },
-                CompleteOfferingPuzzle);
+                CompleteOfferingPuzzle,
+                false);
         }
 
         private void CreatePuzzleButton(string label, string token, int index)
@@ -1863,9 +1989,10 @@ namespace ChapterGame
             playerIdleFrames.Clear();
             playerWalkFrames.Clear();
             playerLanternFrames.Clear();
-            playerIdleFrames.AddRange(LoadSpriteSheet(CharacterFolder + "待机.png", 4, 2, 1, true));
-            playerWalkFrames.AddRange(LoadSpriteSheet(CharacterFolder + "行走.png", 8, 1, 8, true));
-            playerLanternFrames.AddRange(LoadSpriteSheet(CharacterFolder + "举灯动作.png", 6, 1, 6, true));
+            playerIdleFrames.AddRange(LoadSpriteSheet(CharacterFolder + "待机1.png", 5, 1, 1, true));
+            playerWalkFrames.AddRange(LoadSpriteSheet(CharacterFolder + "行走1.png", 8, 1, 8, true));
+            playerLanternFrames.AddRange(LoadSpriteSheet(CharacterFolder + "提灯.jpg", 8, 1, 8, true, true));
+            playerDisplaySize = GetPlayerDisplaySizeFromWalkFrames();
             SetPlayerAnimation("idle", true);
         }
 
@@ -1892,7 +2019,7 @@ namespace ChapterGame
 
         private void UpdatePlayer(float deltaTime)
         {
-            if (inputLocked || playerImage == null || characterRoot == null || !characterRoot.gameObject.activeSelf || modal.activeSelf || dialoguePanel.activeSelf || (maskPuzzlePanel != null && maskPuzzlePanel.activeSelf) || (genericPuzzlePanel != null && genericPuzzlePanel.activeSelf))
+            if (inputLocked || playerImage == null || characterRoot == null || !characterRoot.gameObject.activeSelf || modal.activeSelf || dialoguePanel.activeSelf || (maskPuzzlePanel != null && maskPuzzlePanel.activeSelf) || (genericPuzzlePanel != null && genericPuzzlePanel.activeSelf) || (cuttingTablePanel != null && cuttingTablePanel.activeSelf))
             {
                 return;
             }
@@ -1913,6 +2040,11 @@ namespace ChapterGame
                 var playerWorldX = sceneWidth * playerX;
                 var nextPlayerWorldX = playerWorldX + axis * 430f * deltaTime;
                 if (TryHandleChapter1BoundaryTransition(axis, nextPlayerWorldX))
+                {
+                    return;
+                }
+
+                if (TryHandleChapter2BoundaryTransition(axis, nextPlayerWorldX))
                 {
                     return;
                 }
@@ -1995,12 +2127,22 @@ namespace ChapterGame
                             return BoundaryBlocked;
                         }
 
+                        if (flags.Contains("c1_lantern_lit") && flags.Contains("c1_seen_named_lantern"))
+                        {
+                            return "c1_well";
+                        }
+
                         return "c1_grandma_home";
                     case "c1_grandma_home":
-                        if (!inventory.Contains("黑灯（未点燃）"))
+                        if (!inventory.Contains("黑灯（未点燃）") && !inventory.Contains("黑灯（已点燃）"))
                         {
                             SayBoundaryBlocked("先找到外婆留下的黑灯。");
                             return BoundaryBlocked;
+                        }
+
+                        if (flags.Contains("c1_lantern_lit"))
+                        {
+                            return "c1_well";
                         }
 
                         return "c1_mourning_hall";
@@ -2031,6 +2173,44 @@ namespace ChapterGame
             }
 
             return null;
+        }
+
+        private bool TryHandleChapter2BoundaryTransition(float axis, float nextPlayerWorldX)
+        {
+            if (currentChapterId != "chapter2" || string.IsNullOrEmpty(currentSceneId))
+            {
+                return false;
+            }
+
+            var padding = sceneWidth * GetPlayerEdgePadding();
+            if (axis > 0f && nextPlayerWorldX < sceneWidth - padding)
+            {
+                return false;
+            }
+
+            if (axis < 0f && nextPlayerWorldX > padding)
+            {
+                return false;
+            }
+
+            var side = axis > 0f ? SpawnRight : SpawnLeft;
+            var spawnSide = axis > 0f ? SpawnLeft : SpawnRight;
+            var targetSceneId = GetChapter2BoundaryTarget(side, out var blockedMessage);
+            if (!string.IsNullOrEmpty(blockedMessage))
+            {
+                SayBoundaryBlocked(blockedMessage);
+                return true;
+            }
+
+            if (string.IsNullOrEmpty(targetSceneId))
+            {
+                return false;
+            }
+
+            playerFacingRight = axis > 0f;
+            SetPlayerAnimation("walk", false);
+            GoToScene(targetSceneId, spawnSide);
+            return true;
         }
 
         private bool TryHandleChapter4BoundaryTransition(float axis, float nextPlayerWorldX)
@@ -2242,7 +2422,7 @@ namespace ChapterGame
         {
             ClearBoundaryNavigationState();
 
-            if (boundaryPromptImage == null || inputLocked || (currentChapterId != "chapter2" && currentChapterId != "chapter3") || string.IsNullOrEmpty(currentSceneId) || playerImage == null || characterRoot == null || !characterRoot.gameObject.activeSelf || modal.activeSelf || dialoguePanel.activeSelf || (maskPuzzlePanel != null && maskPuzzlePanel.activeSelf) || (genericPuzzlePanel != null && genericPuzzlePanel.activeSelf))
+            if (boundaryPromptImage == null || inputLocked || currentChapterId != "chapter3" || string.IsNullOrEmpty(currentSceneId) || playerImage == null || characterRoot == null || !characterRoot.gameObject.activeSelf || modal.activeSelf || dialoguePanel.activeSelf || (maskPuzzlePanel != null && maskPuzzlePanel.activeSelf) || (genericPuzzlePanel != null && genericPuzzlePanel.activeSelf) || (cuttingTablePanel != null && cuttingTablePanel.activeSelf))
             {
                 SetBoundaryPromptVisible(false);
                 return;
@@ -2253,68 +2433,7 @@ namespace ChapterGame
                 return;
             }
 
-            if (TrySetupChapter2DoorNavigation())
-            {
-                return;
-            }
-
-            if (currentChapterId != "chapter2")
-            {
-                SetBoundaryPromptVisible(false);
-                return;
-            }
-
-            var padding = GetPlayerEdgePadding();
-            var leftEdge = playerX <= padding + 0.012f;
-            var rightEdge = playerX >= 1f - padding - 0.012f;
-            if (!leftEdge && !rightEdge)
-            {
-                SetBoundaryPromptVisible(false);
-                return;
-            }
-
-            var side = rightEdge ? SpawnRight : SpawnLeft;
-            var target = GetChapter2BoundaryTarget(side, out var blockedMessage);
-            if (string.IsNullOrEmpty(target) && string.IsNullOrEmpty(blockedMessage))
-            {
-                SetBoundaryPromptVisible(false);
-                return;
-            }
-
-            boundaryNavigationTargetSceneId = target;
-            boundaryNavigationBlockedMessage = blockedMessage;
-            boundaryNavigationSide = side;
-            boundaryNavigationSpawnSide = side == SpawnRight ? SpawnLeft : SpawnRight;
-            PositionBoundaryPrompt();
-            SetBoundaryPromptVisible(true);
-        }
-
-        private bool TrySetupChapter2DoorNavigation()
-        {
-            if (currentSceneId != "c2_door")
-            {
-                return false;
-            }
-
-            if (playerX < Chapter2DoorLanternMinX || playerX > Chapter2DoorLanternMaxX)
-            {
-                return false;
-            }
-
-            if (!flags.Contains("c2_door_sign_checked") || !flags.Contains("c2_door_lantern_checked"))
-            {
-                boundaryNavigationBlockedMessage = "先调查纸马铺招牌和红灯笼。";
-            }
-            else
-            {
-                boundaryNavigationTargetSceneId = "c2_front";
-            }
-
-            boundaryNavigationSide = SpawnRight;
-            boundaryNavigationSpawnSide = SpawnLeft;
-            PositionBoundaryPrompt();
-            SetBoundaryPromptVisible(true);
-            return true;
+            SetBoundaryPromptVisible(false);
         }
 
         private bool TrySetupChapter3Navigation()
@@ -2495,6 +2614,14 @@ namespace ChapterGame
             {
                 switch (currentSceneId)
                 {
+                    case "c2_door":
+                        if (!flags.Contains("c2_door_sign_checked") || !flags.Contains("c2_door_lantern_checked"))
+                        {
+                            blockedMessage = "Check the sign and red lantern first.";
+                            return null;
+                        }
+
+                        return "c2_front";
                     case "c2_front":
                         return "c2_paper_people";
                     case "c2_paper_people":
@@ -2606,16 +2733,43 @@ namespace ChapterGame
             }
 
             var rect = playerImage.rectTransform;
-            var width = PlayerIdleWidth;
-            if (playerImage.sprite != null)
-            {
-                var spriteRect = playerImage.sprite.rect;
-                width = PlayerIdleHeight * spriteRect.width / Mathf.Max(1f, spriteRect.height);
-            }
-
-            rect.sizeDelta = new Vector2(width, PlayerIdleHeight);
+            rect.sizeDelta = playerDisplaySize;
             rect.anchoredPosition = new Vector2(sceneWidth * playerX, 104f);
             rect.localScale = new Vector3(playerFacingRight ? 1f : -1f, 1f, 1f);
+        }
+
+        private Vector2 GetPlayerDisplaySizeFromWalkFrames()
+        {
+            var aspect = GetAverageSpriteAspect(playerWalkFrames);
+            if (aspect <= 0f)
+            {
+                aspect = PlayerIdleWidth / PlayerIdleHeight;
+            }
+
+            return new Vector2(PlayerDisplayHeight * aspect, PlayerDisplayHeight);
+        }
+
+        private static float GetAverageSpriteAspect(IReadOnlyList<Sprite> sprites)
+        {
+            if (sprites == null || sprites.Count == 0)
+            {
+                return 0f;
+            }
+
+            var total = 0f;
+            var count = 0;
+            foreach (var sprite in sprites)
+            {
+                if (sprite == null)
+                {
+                    continue;
+                }
+
+                total += sprite.rect.width / Mathf.Max(1f, sprite.rect.height);
+                count++;
+            }
+
+            return count > 0 ? total / count : 0f;
         }
 
         private void RefreshHud()
@@ -2649,9 +2803,9 @@ namespace ChapterGame
 
             AddScene(new SceneDefinition("c1_bridge", "chapter1", "石桥", Chapter1Folder, "石桥区域", "石桥区域灯影下场景", "调查桥边河灯；之后继续向右寻找外婆留下的黑灯")
                 .WithLightMessage("河灯上的字在灯影下浮出，水面像在把名字往下拖。")
-                .AddProp("普通河灯", Chapter1Folder + "普通河灯.png", new Rect(0.42f, 0.18f, 0.54f, 0.32f), 1f, false, null, "c1_seen_named_lantern")
-                .AddProp("写有名字的河灯", Chapter1Folder + "写有名字的河灯.png", new Rect(0.38f, 0.15f, 0.58f, 0.38f), 1f, true, "c1_seen_named_lantern")
-                .Add("河灯", new Rect(0.38f, 0.16f, 0.58f, 0.40f), delegate
+                .AddProp("普通河灯", Chapter1Folder + "普通河灯.png", new Rect(0.2592f, 0.2383f, 0.3792f, 0.3783f), 1f, false, null, "c1_seen_named_lantern")
+                .AddProp("写有名字的河灯", Chapter1Folder + "写有名字的河灯.png", new Rect(0.2192f, 0.2083f, 0.4192f, 0.4383f), 1f, true, "c1_seen_named_lantern")
+                .Add("河灯", new Rect(0.2192f, 0.2183f, 0.4192f, 0.4583f), delegate
                 {
                     if (!flags.Contains("c1_lantern_lit"))
                     {
@@ -2672,19 +2826,18 @@ namespace ChapterGame
 
             AddScene(new SceneDefinition("c1_grandma_home", "chapter1", "外婆家", Chapter1Folder, "外婆家", "外婆家灯影", "寻找外婆留下的东西，获得黑灯")
                 .WithLightMessage("外婆家在灯影下泛出冷光，旧物的影子像还停在原处。")
-                .AddProp("旧藤椅", Chapter1Folder + "旧藤椅.png", new Rect(0.16f, 0.20f, 0.34f, 0.46f), 1f)
-                .AddProp("香炉", Chapter1Folder + "香炉.png", new Rect(0.42f, 0.20f, 0.52f, 0.36f), 1f)
-                .AddProp("外婆", Chapter1Folder + "外婆.png", new Rect(0.18f, 0.18f, 0.36f, 0.70f), 0.72f, false, "c1_has_lantern")
-                .AddProp("黑灯", Chapter1Folder + "黑灯.png", new Rect(0.62f, 0.24f, 0.78f, 0.56f), 1f, false, null, "c1_has_lantern")
-                .Add("旧藤椅", new Rect(0.16f, 0.24f, 0.34f, 0.50f), delegate
+                .AddProp("旧藤椅", Chapter1Folder + "旧藤椅.png", new Rect(0.2225f, 0.20f, 0.4025f, 0.46f), 1f, false, null, null, true, 0f, -1f, 1f)
+                .AddProp("香炉", Chapter1Folder + "香炉.png", new Rect(0.5981f, 0.35f, 0.6981f, 0.51f), 1f, false, null, null, true, 0f, 0.91749f, 0.91749f)
+                .AddProp("黑灯", Chapter1Folder + "黑灯.png", new Rect(0.6471f, 0.4724f, 0.8071f, 0.7924f), 1f, false, null, "c1_has_lantern", true, 0f, 0.98834f, 0.98834f)
+                .Add("旧藤椅", new Rect(0.2225f, 0.24f, 0.4025f, 0.50f), delegate
                 {
                     Say("林照萤：藤椅还在，只是没人再坐了。");
                 })
-                .Add("香炉", new Rect(0.40f, 0.22f, 0.54f, 0.38f), delegate
+                .Add("香炉", new Rect(0.5781f, 0.37f, 0.7181f, 0.53f), delegate
                 {
                     Say("林照萤：香灰还没散……有人来过？");
                 })
-                .Add("黑灯", new Rect(0.60f, 0.22f, 0.80f, 0.58f), delegate
+                .Add("黑灯", new Rect(0.6271f, 0.4524f, 0.8271f, 0.8124f), delegate
                 {
                     Take("黑灯（未点燃）", "c1_has_lantern", "林照萤：这盏黑灯……外婆以前从不让我碰。\n获得道具：黑灯（未点燃）。\n当前目标：去灵堂找到点燃黑灯的方法。");
                     Inspect("黑灯（未点燃）", "灯芯冰冷，灯罩内侧有被烟熏出的黑色纹路。黑灯未点燃前，无法进入灯影视角。", Chapter1Folder + "黑灯.png");
@@ -2693,11 +2846,11 @@ namespace ChapterGame
 
             AddScene(new SceneDefinition("c1_mourning_hall", "chapter1", "灵堂", Chapter1Folder, "灵堂区域", "灵堂区域灯影下场景", "按果、糕、酒、香、火的顺序摆放供品，点燃黑灯")
                 .WithLightMessage("供桌残留痕迹浮现：果印、糕屑、杯痕、香灰、烛油。")
-                .AddProp("未摆贡品的供桌", Chapter1Folder + "未摆贡品的供桌.png", new Rect(0.26f, 0.18f, 0.70f, 0.50f), 1f, false, null, "c1_offering_solved")
-                .AddProp("摆满贡品的供桌", Chapter1Folder + "摆满贡品的供桌.png", new Rect(0.26f, 0.18f, 0.70f, 0.50f), 1f, false, "c1_offering_solved")
-                .AddProp("纸人", Chapter1Folder + "纸人.png", new Rect(0.74f, 0.17f, 0.92f, 0.62f), 1f)
-                .AddProp("黑灯已点燃", Chapter1Folder + "黑灯.png", new Rect(0.58f, 0.26f, 0.74f, 0.58f), 1f, false, "c1_lantern_lit")
-                .Add("供桌", new Rect(0.26f, 0.20f, 0.70f, 0.52f), delegate
+                .AddProp("未摆贡品的供桌", Chapter1Folder + "未摆贡品的供桌.png", new Rect(0.10f, 0.10f, 0.87f, 0.48f), 1f, false, null, "c1_offering_solved")
+                .AddProp("摆满贡品的供桌", Chapter1Folder + "摆满贡品的供桌.png", new Rect(0.10f, 0.10f, 0.87f, 0.48f), 1f, false, "c1_offering_solved")
+                .AddProp("纸人", Chapter1Folder + "纸人.png", new Rect(0.61f, 0.08f, 0.94f, 0.74f), 1f, false, null, null, true, 0f, 0.17099f, 0.17099f)
+                .AddProp("外婆", Chapter1Folder + "外婆.png", new Rect(0.13f, 0.10f, 0.63f, 0.70f), 0.72f, false, "c1_lantern_lit", null, true, 0f, 0.65365f, 0.65365f)
+                .Add("供桌", new Rect(0.10f, 0.10f, 0.87f, 0.48f), delegate
                 {
                     if (flags.Contains("c1_offering_solved"))
                     {
@@ -2707,11 +2860,11 @@ namespace ChapterGame
 
                     Say("林照萤：供桌上的位置是空的，像是在等什么。\n残留痕迹：果印、糕屑、杯痕、香灰、烛油。");
                 })
-                .Add("纸人", new Rect(0.76f, 0.22f, 0.92f, 0.62f), delegate
+                .Add("纸人", new Rect(0.61f, 0.08f, 0.94f, 0.74f), delegate
                 {
                     Inspect("纸人", "林照萤：纸人的脸……好像被人重新画过。", Chapter1Folder + "纸人.png");
                 })
-                .Add("摆放供品", new Rect(0.30f, 0.52f, 0.64f, 0.78f), delegate
+                .Add("摆放供品", new Rect(0.10f, 0.10f, 0.87f, 0.48f), delegate
                 {
                     ShowOfferingPuzzle();
                 }, null, "c1_offering_solved"));
@@ -2743,22 +2896,32 @@ namespace ChapterGame
             chapters["chapter2"] = new ChapterDefinition("第二章 纸马铺", "c2_door", "当前目标：进入纸马铺，寻找祭祀线索。");
 
             AddScene(new SceneDefinition("c2_door", "chapter2", "纸马铺门口", Chapter2Folder, "纸马铺门口", null, "进入纸马铺")
-                .Add("招牌", new Rect(0.18f, 0.55f, 0.35f, 0.70f), delegate
+                .Add("招牌", new Rect(0.50f, 0.76f, 0.86f, 0.92f), delegate
                 {
                     SetFlag("c2_door_sign_checked", "“纸马铺”三个字已经褪色，像是被烟熏了很多年。");
                 }, null, "c2_door_sign_checked")
-                .Add("红灯笼", new Rect(Chapter2DoorLanternMinX, 0.31f, Chapter2DoorLanternMaxX, 0.69f), delegate
+                .Add("红灯笼", new Rect(0.38f, 0.64f, 0.47f, 0.88f), delegate
                 {
                     SetFlag("c2_door_lantern_checked", "红灯笼照着门口，门缝里透出一线暗光。");
-                }, null, "c2_door_lantern_checked"));
+                }, null, "c2_door_lantern_checked")
+                .Add("进入纸马铺", new Rect(0.54f, 0.18f, 0.76f, 0.70f), delegate
+                {
+                    if (!flags.Contains("c2_door_sign_checked") || !flags.Contains("c2_door_lantern_checked"))
+                    {
+                        SayBoundaryBlocked("先调查纸马铺招牌和红灯笼。");
+                        return;
+                    }
+
+                    GoToScene("c2_front", SpawnLeft);
+                }));
 
             AddScene(new SceneDefinition("c2_front", "chapter2", "前厅", Chapter2Folder, "纸马铺前厅", "纸马铺前厅灯影下场景", "在纸马铺内寻找祭祀线索")
                 .WithLightMessage("柜台下方像藏着暗格，抽屉也被灯影勾出了缝。")
-                .AddProp("纸马铺老板", Chapter2Folder + "纸马铺老板.png", new Rect(0.46f, 0.15f, 0.64f, 0.82f), 1f, false, null, null, true, 0f, 0.84331f, 0.84331f)
+                .AddProp("纸马铺老板", Chapter2Folder + "纸马铺老板_桌后.png", new Rect(0.31f, 0.16f, 0.51f, 0.82f), 1f, false, null, null, true, 0f, 0.71413f, 0.71413f)
                 .AddProp("调查账本", Chapter2Folder + "调查账本.png", new Rect(0.31f, 0.25f, 0.45f, 0.46f), 1f, false, null, "c2_read_account", true, 0f, 0.43383f, 0.43383f)
-                .AddProp("后院钥匙", Chapter2Folder + "后院钥匙.png", new Rect(0.35f, 0.19f, 0.40f, 0.32f), 1f, true, null, "c2_key", true, 0f, 0.56399f, 0.52169f)
+                .AddProp("后院钥匙", Chapter2Folder + "后院钥匙.png", new Rect(0.27f, 0.16f, 0.34f, 0.28f), 1f, true, null, "c2_key", true, 0f, 0.56399f, 0.52169f)
                 .AddProp("剪纸碎片三", Chapter2Folder + "剪纸碎片三.png", new Rect(0.48f, 0.18f, 0.56f, 0.31f), 1f, true, null, "c2_piece3", true, 0f, 0.37262f, 0.37262f)
-                .Add("老板对话", new Rect(0.48f, 0.26f, 0.62f, 0.78f), delegate
+                .Add("老板对话", new Rect(0.32f, 0.30f, 0.50f, 0.78f), delegate
                 {
                     Inspect("纸马铺老板",
                         "老板：姑娘，这时候来纸马铺，可不太吉利。\n林照萤：我想问问，最近镇上是不是又在准备什么祭祀？\n老板：镇上的事，都是老规矩。纸马、纸人、纸灯，该扎的扎，该烧的烧。\n林照萤：我外婆留下的东西里，提到过这里。\n老板：沈掌灯人啊……她知道得太多了。",
@@ -2773,7 +2936,7 @@ namespace ChapterGame
                     RebuildProps();
                     RebuildHotspots();
                 })
-                .AddLight("暗格钥匙", new Rect(0.36f, 0.22f, 0.39f, 0.30f), delegate
+                .AddLight("暗格钥匙", new Rect(0.28f, 0.17f, 0.33f, 0.27f), delegate
                 {
                     Take("后院小钥匙", "c2_key", "暗格里压着一把后院小钥匙。");
                 }, null, "c2_key")
@@ -2793,22 +2956,26 @@ namespace ChapterGame
                 .Add("挂名签纸人", new Rect(0.70f, 0.46f, 0.80f, 0.62f), delegate { Inspect("挂名签", "名签上的名字被涂黑，只剩墨迹干裂后的空白。", Chapter2Folder + "挂名签.png"); }));
 
             AddScene(new SceneDefinition("c2_cutting_table", "chapter2", "剪纸台", Chapter2Folder, "剪纸台区域", null, "调查后面的剪纸台")
-                .AddProp("调查剪纸台", Chapter2Folder + "调查剪纸台.png", new Rect(0.50f, 0.18f, 0.84f, 0.64f), 1f, false, "c2_cutting_table_revealed", null, true, 0f, 0.62291f, 0.62291f)
-                .AddProp("浆糊刷", Chapter2Folder + "浆糊刷.png", new Rect(0.42f, 0.17f, 0.50f, 0.30f), 1f, false, "c2_cutting_table_revealed", "c2_brush", true, 0f, 0.62291f, 0.62291f)
-                .AddProp("剪纸碎片四", Chapter2Folder + "剪纸碎片四.png", new Rect(0.74f, 0.16f, 0.84f, 0.31f), 1f, false, "c2_cutting_table_revealed", "c2_piece4", true, 0f, 0.62291f, 0.62291f)
-                .AddProp("窗户平面图", Chapter2Folder + "调查窗户平面图.png", new Rect(0.10f, 0.44f, 0.47f, 0.78f), 1f, false, "c2_window_complete", null, true, 0f, 1.2593f, 1.2593f)
-                .Add("后面的剪纸台", new Rect(0.58f, 0.22f, 0.88f, 0.54f), delegate
+                .AddProp("调查剪纸台", Chapter2Folder + "调查剪纸台.png", new Rect(0.18f, 0.14f, 0.86f, 0.70f), 1f, false, "__cutting_table_closeup_only", null, true, 0f, 1.50769f, 1.50769f)
+                .AddProp("浆糊刷", Chapter2Folder + "浆糊刷.png", new Rect(0.30f, 0.28f, 0.43f, 0.58f), 1f, false, "__cutting_table_closeup_only", "c2_brush", true, 0f, 1.72764f, 1.72764f)
+                .AddProp("剪纸碎片四", Chapter2Folder + "剪纸碎片四.png", new Rect(0.59f, 0.35f, 0.76f, 0.64f), 1f, false, "__cutting_table_closeup_only", "c2_piece4", true, 0f, 1.09644f, 1.09644f)
+                .AddProp("窗户平面图", Chapter2Folder + "调查窗户平面图.png", new Rect(0.36f, 0.52f, 0.72f, 0.88f), 1f, false, "c2_window_complete", null, true, 0f, 1.2593f, 1.2593f)
+                .Add("后面的剪纸台", new Rect(0.20f, 0.20f, 0.76f, 0.47f), delegate
                 {
-                    SetFlag("c2_cutting_table_revealed", "你掀开后面的剪纸台，红纸、浆糊刷和最后一片剪纸露了出来。");
+                    flags.Add("c2_cutting_table_revealed");
+                    Say("你掀开后面的剪纸台，红纸、浆糊刷和最后一片剪纸露了出来。");
                     SetObjective("拿到剪纸碎片四和浆糊刷，完成窗花");
+                    RebuildProps();
+                    RebuildHotspots();
+                    ShowCuttingTableCloseup();
                 }, null, "c2_cutting_table_revealed")
-                .Add("调查剪纸台", new Rect(0.56f, 0.26f, 0.78f, 0.56f), delegate
+                .Add("调查剪纸台", new Rect(0.18f, 0.14f, 0.86f, 0.70f), delegate
                 {
-                    Inspect("剪纸台", "红纸、剪刀和浆糊都还放在台上，像刚被人用过。", Chapter2Folder + "调查剪纸台.png");
+                    ShowCuttingTableCloseup();
                 }, "c2_cutting_table_revealed")
-                .Add("浆糊刷", new Rect(0.44f, 0.20f, 0.48f, 0.28f), delegate { Take("浆糊刷", "c2_brush", "你拿到了浆糊刷。"); }, "c2_cutting_table_revealed", "c2_brush")
-                .Add("剪纸碎片四", new Rect(0.77f, 0.20f, 0.82f, 0.28f), delegate { Take("剪纸碎片四", "c2_piece4", "红纸堆里藏着剪纸碎片四。"); }, "c2_cutting_table_revealed", "c2_piece4")
-                .Add("旧窗户", new Rect(0.12f, 0.42f, 0.46f, 0.80f), delegate
+                .Add("浆糊刷", new Rect(0.30f, 0.28f, 0.43f, 0.58f), delegate { Take("浆糊刷", "c2_brush", "你拿到了浆糊刷。"); }, "__cutting_table_closeup_only", "c2_brush")
+                .Add("剪纸碎片四", new Rect(0.59f, 0.35f, 0.76f, 0.64f), delegate { Take("剪纸碎片四", "c2_piece4", "红纸堆里藏着剪纸碎片四。"); }, "__cutting_table_closeup_only", "c2_piece4")
+                .Add("旧窗户", new Rect(0.36f, 0.52f, 0.72f, 0.88f), delegate
                 {
                     if (!NeedFlag("c2_piece1", "窗花还缺剪纸碎片一。") || !NeedFlag("c2_piece2", "窗花还缺剪纸碎片二。") || !NeedFlag("c2_piece3", "窗花还缺剪纸碎片三。") || !NeedFlag("c2_piece4", "窗花还缺剪纸碎片四。") || !NeedItem("浆糊刷", "还需要浆糊刷把窗花贴上。"))
                     {
@@ -2821,8 +2988,8 @@ namespace ChapterGame
                     RebuildProps();
                     RebuildHotspots();
                 }, null, "c2_window_complete")
-                .Add("窗花拖拽解密", new Rect(0.12f, 0.42f, 0.46f, 0.80f), delegate { ShowWindowPuzzle(); }, null, "c2_window_complete")
-                .AddLight("窗花投影", new Rect(0.08f, 0.44f, 0.48f, 0.80f), delegate
+                .Add("窗花拖拽解密", new Rect(0.36f, 0.52f, 0.72f, 0.88f), delegate { ShowWindowPuzzle(); }, null, "c2_window_complete")
+                .AddLight("窗花投影", new Rect(0.36f, 0.52f, 0.72f, 0.88f), delegate
                 {
                     if (!NeedFlag("c2_window_complete", "先把完整窗花贴到旧窗上。"))
                     {
@@ -2842,7 +3009,7 @@ namespace ChapterGame
                 .AddProp("灯影下未烧尽的残页", Chapter2Folder + "灯影下未烧尽的残页.png", new Rect(0.55f, 0.15f, 0.64f, 0.29f), 1f, true, null, "c2_page_read", true, 0f, 0.3931f, 0.3931f)
                 .Add("火钳", new Rect(0.64f, 0.20f, 0.74f, 0.28f), delegate { Take("火钳", "c2_tongs", "你拿到了火钳。"); }, null, "c2_tongs")
                 .Add("炉灰铲", new Rect(0.45f, 0.25f, 0.53f, 0.34f), delegate { Take("炉灰铲", "c2_shovel", "你拿到了炉灰铲。"); }, null, "c2_shovel")
-                .Add("焚纸炉", new Rect(0.58f, 0.22f, 0.86f, 0.68f), delegate
+                .Add("焚纸炉", new Rect(0.50f, 0.30f, 0.76f, 0.60f), delegate
                 {
                     if (!lightView)
                     {
@@ -2861,7 +3028,7 @@ namespace ChapterGame
                     RebuildProps();
                     CompleteChapter("想知道名字去哪了，就去听那出无声戏。第二章结束，第三章「无声戏台」已解锁。");
                 })
-                .Add("焚纸炉拖拽解密", new Rect(0.58f, 0.22f, 0.86f, 0.68f), delegate { ShowFurnacePuzzle(); }, null, "c2_page_read"));
+                .Add("焚纸炉拖拽解密", new Rect(0.50f, 0.30f, 0.76f, 0.60f), delegate { ShowFurnacePuzzle(); }, null, "c2_page_read"));
         }
 
         private void BuildChapter3()
@@ -2891,7 +3058,7 @@ namespace ChapterGame
                     Take("戏文残页", "c3_script", "你在舞台中央前的楼梯旁获得了戏文残页和鼓棒。");
                     Inspect("戏文残页", "喜面入门，哀面开路，无名守灯。\n台上无人，锣鼓却像仍在等一声开场。", Chapter3Folder + "戏文残页.png");
                 }, null, "c3_script")
-                .Add("破锣", new Rect(0.58f, 0.18f, 0.74f, 0.38f), delegate
+                .Add("破锣", new Rect(0.30f, 0.17f, 0.40f, 0.28f), delegate
                 {
                     if (!NeedItem("鼓棒", "虽然破旧了，但用手还是敲不响这个破锣。"))
                     {
@@ -3449,7 +3616,7 @@ namespace ChapterGame
             return Sprite.Create(texture, new Rect(0, 0, texture.width, texture.height), new Vector2(0.5f, 0.5f), 100);
         }
 
-        private static List<Sprite> LoadSpriteSheet(string assetPath, int columns, int rows, int frameCount, bool trimTransparent = false)
+        private static List<Sprite> LoadSpriteSheet(string assetPath, int columns, int rows, int frameCount, bool trimTransparent = false, bool clearBlackBackground = false)
         {
             var frames = new List<Sprite>();
             Texture2D texture = null;
@@ -3472,24 +3639,91 @@ namespace ChapterGame
                 return frames;
             }
 
+            if (clearBlackBackground)
+            {
+                ClearBlackBackground(texture);
+            }
+
             var cellWidth = texture.width / columns;
             var cellHeight = texture.height / rows;
             var total = Mathf.Min(frameCount, columns * rows);
+            var sharedTrim = trimTransparent ? GetSharedTransparentTrim(texture, columns, cellWidth, cellHeight, total) : null;
             for (var i = 0; i < total; i++)
             {
                 var column = i % columns;
                 var rowFromTop = i / columns;
                 var y = texture.height - (rowFromTop + 1) * cellHeight;
                 var rect = new Rect(column * cellWidth, y, cellWidth, cellHeight);
-                if (trimTransparent)
+                if (sharedTrim.HasValue)
                 {
-                    rect = TrimTransparentPixels(texture, rect);
+                    var trim = sharedTrim.Value;
+                    rect = new Rect(rect.x + trim.x, rect.y + trim.y, trim.width, trim.height);
                 }
 
                 frames.Add(Sprite.Create(texture, rect, new Vector2(0.5f, 0f), 100));
             }
 
             return frames;
+        }
+
+        private static void ClearBlackBackground(Texture2D texture)
+        {
+            var pixels = texture.GetPixels32();
+            for (var i = 0; i < pixels.Length; i++)
+            {
+                var pixel = pixels[i];
+                if (pixel.r <= 6 && pixel.g <= 6 && pixel.b <= 6)
+                {
+                    pixel.a = 0;
+                    pixels[i] = pixel;
+                }
+            }
+
+            texture.SetPixels32(pixels);
+            texture.Apply();
+        }
+
+        private static Rect? GetSharedTransparentTrim(Texture2D texture, int columns, int cellWidth, int cellHeight, int frameCount)
+        {
+            var minX = cellWidth;
+            var minY = cellHeight;
+            var maxX = -1;
+            var maxY = -1;
+
+            for (var i = 0; i < frameCount; i++)
+            {
+                var column = i % columns;
+                var rowFromTop = i / columns;
+                var startX = column * cellWidth;
+                var startY = texture.height - (rowFromTop + 1) * cellHeight;
+                for (var y = 0; y < cellHeight; y++)
+                {
+                    for (var x = 0; x < cellWidth; x++)
+                    {
+                        if (texture.GetPixel(startX + x, startY + y).a <= 0.03f)
+                        {
+                            continue;
+                        }
+
+                        minX = Mathf.Min(minX, x);
+                        minY = Mathf.Min(minY, y);
+                        maxX = Mathf.Max(maxX, x);
+                        maxY = Mathf.Max(maxY, y);
+                    }
+                }
+            }
+
+            if (maxX < minX || maxY < minY)
+            {
+                return null;
+            }
+
+            const int padding = 2;
+            minX = Mathf.Max(0, minX - padding);
+            minY = Mathf.Max(0, minY - padding);
+            maxX = Mathf.Min(cellWidth - 1, maxX + padding);
+            maxY = Mathf.Min(cellHeight - 1, maxY + padding);
+            return new Rect(minX, minY, maxX - minX + 1, maxY - minY + 1);
         }
 
         private static Rect TrimTransparentPixels(Texture2D texture, Rect sourceRect)
